@@ -6,7 +6,7 @@ export const INITIAL_USERS: User[] = [
     name: 'ผู้ดูแลระบบ (Admin)',
     email: 'admin@school.ac.th',
     username: 'admin',
-    password: '05072525',
+    password: '213894120',
     role: 'admin',
     subjectSpecialty: 'ผู้ดูแลระบบและฝ่ายทะเบียนวิชาการ',
     phone: '',

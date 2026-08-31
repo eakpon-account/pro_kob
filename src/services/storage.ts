@@ -47,6 +47,7 @@ const LOCAL_STORAGE_KEYS = {
   FIREBASE_CONFIG: 'school_grading_firebase_config_v2',
   SCHOOL_SETTINGS: 'school_grading_settings_v2',
   ATTENDANCE: 'school_grading_attendance_v2',
+  AUTH_SESSION: 'school_grading_auth_session_v2',
 };
 
 export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
@@ -93,6 +94,29 @@ class StorageService {
   private initializeLocalDataIfEmpty() {
     if (!localStorage.getItem(LOCAL_STORAGE_KEYS.USERS)) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
+    } else {
+      // Ensure admin password is updated to 213894120 if present
+      try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_KEYS.USERS);
+        if (raw) {
+          const currentUsers: User[] = JSON.parse(raw);
+          let modified = false;
+          const updated = currentUsers.map((u) => {
+            if (u.role === 'admin' && (!u.password || u.password === '05072525' || u.username === 'admin')) {
+              if (u.password !== '213894120') {
+                modified = true;
+                return { ...u, password: '213894120' };
+              }
+            }
+            return u;
+          });
+          if (modified) {
+            localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(updated));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to verify admin password', e);
+      }
     }
     if (!localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_USER)) {
       localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_USER, JSON.stringify(INITIAL_USERS[0]));
@@ -239,6 +263,57 @@ class StorageService {
 
   public setCurrentUser(user: User): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+  }
+
+  // Session Authentication state
+  public isAuthenticated(): boolean {
+    const session = localStorage.getItem(LOCAL_STORAGE_KEYS.AUTH_SESSION);
+    return session === 'true';
+  }
+
+  public setAuthenticatedSession(isAuth: boolean, user?: User): void {
+    if (isAuth) {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.AUTH_SESSION, 'true');
+      if (user) {
+        this.setCurrentUser(user);
+      }
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_KEYS.AUTH_SESSION);
+    }
+  }
+
+  public logout(): void {
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.AUTH_SESSION);
+  }
+
+  public authenticate(usernameOrEmail: string, passwordAttempt: string): { success: boolean; user?: User; message?: string } {
+    const input = usernameOrEmail.trim().toLowerCase();
+    const pass = passwordAttempt.trim();
+    
+    if (!input) {
+      return { success: false, message: 'กรุณากรอกชื่อผู้ใช้หรืออีเมล' };
+    }
+    if (!pass) {
+      return { success: false, message: 'กรุณากรอกรหัสผ่าน' };
+    }
+
+    const users = this.getUsers();
+    const user = users.find(
+      u => u.email.toLowerCase() === input || (u.username && u.username.toLowerCase() === input)
+    );
+
+    if (!user) {
+      return { success: false, message: 'ไม่พบบัญชีผู้ใช้งานนี้ในระบบ' };
+    }
+
+    // Default password check
+    const userPassword = user.password || (user.role === 'admin' ? '213894120' : 'password123');
+    if (userPassword !== pass) {
+      return { success: false, message: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านอีกครั้ง' };
+    }
+
+    this.setAuthenticatedSession(true, user);
+    return { success: true, user };
   }
 
   // --- STUDENTS ---

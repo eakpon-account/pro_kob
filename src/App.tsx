@@ -35,6 +35,9 @@ import {
   LoginModal 
 } from './components/LoginModal';
 import { 
+  LoginPage 
+} from './components/LoginPage';
+import { 
   AvatarUploadModal 
 } from './components/AvatarUploadModal';
 import { 
@@ -49,6 +52,9 @@ import { Menu, Plus, Database, Sparkles, Award, UserCheck, ShieldCheck, LogIn, A
 import { MainTabType } from './components/Navbar';
 
 export default function App() {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => storage.isAuthenticated());
+
   // State
   const [currentTab, setCurrentTab] = useState<MainTabType>('dashboard');
   const [settingsSubTab, setSettingsSubTab] = useState<SettingsTabId>('users');
@@ -97,6 +103,17 @@ export default function App() {
     setCurrentUser(newUser);
   };
 
+  const handleLoginSuccess = (authenticatedUser: User) => {
+    handleUserChange(authenticatedUser);
+    setIsAuthenticated(true);
+    setShowLoginModal(false);
+  };
+
+  const handleLogout = () => {
+    storage.logout();
+    setIsAuthenticated(false);
+  };
+
   const handleSelectClassAndSubjectFromDashboard = (subjectId: string, classKey: string) => {
     setTargetGradingSubjectId(subjectId);
     setTargetGradingClassKey(classKey);
@@ -138,6 +155,11 @@ export default function App() {
     }
   };
 
+  // If user is not authenticated, display full-screen LoginPage
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   const currentRoleCfg = ROLE_CONFIGS[currentUser.role] || ROLE_CONFIGS.teacher;
   const RoleIcon = currentRoleCfg.icon;
 
@@ -153,6 +175,7 @@ export default function App() {
         onOpenDataManagement={() => handleNavigateToSettings('backup')}
         onOpenAvatarUpload={() => setShowAvatarModal(true)}
         onOpenLoginModal={() => setShowLoginModal(true)}
+        onLogout={handleLogout}
         firebaseStatus={firebaseStatus}
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}

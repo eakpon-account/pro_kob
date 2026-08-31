@@ -45,6 +45,7 @@ interface SidebarProps {
   onOpenDataManagement?: () => void;
   onOpenAvatarUpload: () => void;
   onOpenLoginModal: () => void;
+  onLogout?: () => void;
   firebaseStatus: { connected: boolean; projectId?: string };
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenDataManagement,
   onOpenAvatarUpload,
   onOpenLoginModal,
+  onLogout,
   firebaseStatus,
   mobileMenuOpen,
   setMobileMenuOpen,
@@ -278,22 +280,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* User Profile Card at bottom */}
-        <div className="p-3.5 bg-white m-3 rounded-2xl border border-slate-200 shadow-2xs relative">
+        <div className="p-3.5 bg-white m-3 rounded-2xl border border-slate-200 shadow-2xs relative space-y-2.5">
           
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${currentRoleCfg.badgeBg} ${currentRoleCfg.badgeText} ${currentRoleCfg.badgeBorder}`}>
               <RoleIcon className="w-3 h-3" />
               <span>{currentRoleCfg.shortLabel}</span>
             </span>
 
-            <button
-              onClick={onOpenLoginModal}
-              className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
-              title="เข้าสู่ระบบ / สลับผู้ใช้งาน"
-            >
-              <ArrowRightLeft className="w-3 h-3" />
-              <span>สลับบัญชี</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onOpenLoginModal}
+                className="text-[11px] font-semibold text-slate-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer transition-colors"
+                title="สลับบัญชีผู้ใช้งาน"
+              >
+                <ArrowRightLeft className="w-3 h-3" />
+                <span>สลับ</span>
+              </button>
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 flex items-center gap-1 cursor-pointer transition-colors"
+                  title="ออกจากระบบ"
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span>ออก</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2.5">

@@ -168,7 +168,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormName('');
     setFormEmail('');
     setFormUsername('');
-    setFormPassword('password123');
+    setFormPassword(defaultRole === 'admin' ? '213894120' : 'password123');
     setFormRole(defaultRole);
     setFormSubjectSpecialty(defaultRole === 'teacher' ? 'กลุ่มสาระการเรียนรู้คณิตศาสตร์' : '');
     setFormPhone('');
@@ -182,7 +182,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setFormName(user.name);
     setFormEmail(user.email);
     setFormUsername(user.username || '');
-    setFormPassword(user.password || 'password123');
+    setFormPassword(user.password || (user.role === 'admin' ? '213894120' : 'password123'));
     setFormRole(user.role);
     setFormSubjectSpecialty(user.subjectSpecialty || '');
     setFormPhone(user.phone || '');
@@ -237,7 +237,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       name: formName.trim(),
       email: formEmail.trim(),
       username: formUsername.trim() || formEmail.split('@')[0],
-      password: formPassword.trim() || 'password123',
+      password: formPassword.trim() || (formRole === 'admin' ? '213894120' : 'password123'),
       role: formRole,
       subjectSpecialty: formSubjectSpecialty.trim(),
       phone: formPhone.trim(),
