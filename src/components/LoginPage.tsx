@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   User as UserIcon, 
@@ -6,7 +6,8 @@ import {
   EyeOff, 
   LogIn, 
   AlertCircle, 
-  KeyRound
+  KeyRound,
+  Cloud
 } from 'lucide-react';
 import { User } from '../types';
 import { storage } from '../services/storage';
@@ -22,20 +23,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  // ดึงข้อมูลผู้ใช้และข้อมูลระบบจาก Cloud Firestore ทันทีที่เปิดหน้า Login
+  useEffect(() => {
+    storage.pullAllDataFromFirebase().catch(console.error);
+  }, []);
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setLoading(true);
 
-    setTimeout(() => {
-      const result = storage.authenticate(usernameOrEmail, password);
+    try {
+      // ตรวจสอบข้อมูลใน Local ก่อน
+      let result = storage.authenticate(usernameOrEmail, password);
+      
+      // ถ้าไม่พบ ให้ลองดึงข้อมูลบัญชีล่าสุดจาก Cloud Firestore แล้วตรวจสอบอีกครั้ง
+      if (!result.success) {
+        await storage.pullAllDataFromFirebase();
+        result = storage.authenticate(usernameOrEmail, password);
+      }
+
       setLoading(false);
       if (result.success && result.user) {
         onLoginSuccess(result.user);
       } else {
         setErrorMessage(result.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
       }
-    }, 200);
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMessage('เกิดข้อผิดพลาดในการตรวจสอบข้อมูล: ' + err.message);
+    }
   };
 
   return (

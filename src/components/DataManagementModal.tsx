@@ -167,6 +167,28 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     }
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+
+  const handleSyncAllToCloud = async () => {
+    setIsSyncing(true);
+    setSyncStatusMsg(null);
+    try {
+      const res = await storage.syncAllLocalDataToFirebase();
+      if (res.success) {
+        setSyncStatusMsg(
+          `ซิงค์ข้อมูลขึ้น Firestore สำเร็จ: นักเรียน ${res.counts.students} คน, วิชา ${res.counts.subjects} วิชา, คะแนน ${res.counts.scores} รายการ, การมาเรียน ${res.counts.attendance} รายการ`
+        );
+      } else {
+        setSyncStatusMsg(`ไม่สำเร็จ: ${res.error}`);
+      }
+    } catch (err: any) {
+      setSyncStatusMsg(`ข้อผิดพลาด: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <div 
       className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4"
@@ -481,6 +503,39 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
                   </button>
                 </div>
               </form>
+
+              {/* Sync All Local Data to Firebase Button */}
+              <div className="bg-slate-900 text-white p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                <div>
+                  <h5 className="text-xs font-bold flex items-center gap-1.5 text-emerald-400">
+                    <Cloud className="w-4 h-4" />
+                    <span>นำข้อมูลปัจจุบันใส่ลงในฐานข้อมูล Firebase</span>
+                  </h5>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    อัปโหลดรายชื่อนักเรียน รายวิชา ใบงาน คะแนน และข้อมูลโรงเรียนขึ้น Cloud Firestore
+                  </p>
+                  {syncStatusMsg && (
+                    <p className="text-[11px] text-emerald-300 font-medium mt-1">
+                      {syncStatusMsg}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncAllToCloud}
+                  disabled={isSyncing}
+                  className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 shrink-0 flex items-center justify-center gap-1.5"
+                >
+                  {isSyncing ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>กำลังส่งขึ้น Cloud...</span>
+                    </>
+                  ) : (
+                    <span>นำข้อมูลขึ้น Firebase เดี๋ยวนี้</span>
+                  )}
+                </button>
+              </div>
 
             </div>
           )}

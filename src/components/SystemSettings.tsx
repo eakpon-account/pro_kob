@@ -72,6 +72,8 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
   const [messagingSenderId, setMessagingSenderId] = useState('');
   const [appId, setAppId] = useState('');
   const [firebaseMsg, setFirebaseMsg] = useState<{ text: string; success: boolean } | null>(null);
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [syncDetails, setSyncDetails] = useState<string | null>(null);
 
   // Danger / Clear Data Form State
   const [confirmText, setConfirmText] = useState('');
@@ -137,6 +139,38 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
       setTimeout(() => setStatusMessage(null), 4000);
     } else {
       setFirebaseMsg({ text: 'ไม่สามารถเชื่อมต่อ Firebase ได้ กรุณาตรวจสอบข้อมูล config', success: false });
+    }
+  };
+
+  // Handle Sync All Data to Firebase
+  const handleSyncAllToFirebase = async () => {
+    setIsSyncingFirebase(true);
+    setSyncDetails(null);
+    try {
+      const res = await storage.syncAllLocalDataToFirebase();
+      if (res.success) {
+        setSyncDetails(
+          `อัปโหลดสำเร็จ: นักเรียน ${res.counts.students} คน, รายวิชา ${res.counts.subjects} วิชา, ใบงาน ${res.counts.assignments} รายการ, บันทึกคะแนน ${res.counts.scores} รายการ, บันทึกเวลาเรียน ${res.counts.attendance} แผ่น, บัญชีผู้ใช้ ${res.counts.users} บัญชี`
+        );
+        setStatusMessage({
+          type: 'success',
+          text: 'นำข้อมูลทั้งหมดขึ้น Cloud Firestore เรียบร้อยแล้ว!',
+          subText: `ข้อมูลถูกซิงค์ไปยัง Firebase โครงการ "${firebaseStatus.projectId || 'หลัก'}" สมบูรณ์`,
+        });
+        setTimeout(() => setStatusMessage(null), 5000);
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: 'ไม่สามารถนำข้อมูลขึ้น Firebase ได้: ' + (res.error || 'ข้อผิดพลาดไม่ทราบสาเหตุ'),
+        });
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ Firebase: ' + err.message,
+      });
+    } finally {
+      setIsSyncingFirebase(false);
     }
   };
 
@@ -465,6 +499,46 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
               </button>
             </div>
           </form>
+
+          {/* Sync All Local Data to Firebase Cloud */}
+          <div className="pt-6 border-t border-slate-100">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-5 text-white shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-emerald-400" />
+                    <span>นำข้อมูลปัจจุบันทั้งหมดขึ้น Cloud Firestore ทันที</span>
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                    ส่งข้อมูลนักเรียน, รายวิชา, ใบงาน, คะแนนตัดเกรด, การเช็คชื่อ และการตั้งค่าทั้งหมดที่มีอยู่ในระบบปัจจุบันขึ้นไปยังฐานข้อมูล Firebase Cloud
+                  </p>
+                  {syncDetails && (
+                    <div className="mt-2 text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-500/30">
+                      {syncDetails}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncAllToFirebase}
+                  disabled={isSyncingFirebase}
+                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:opacity-50 active:scale-95"
+                >
+                  {isSyncingFirebase ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>กำลังส่งข้อมูลขึ้น Cloud...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="w-4 h-4 text-white" />
+                      <span>ส่งข้อมูลทั้งหมดขึ้น Cloud เดี๋ยวนี้</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

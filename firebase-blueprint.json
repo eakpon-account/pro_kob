@@ -1,0 +1,155 @@
+{
+  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firestore-blueprint.json",
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Student record in the school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentNumber": { "type": "number" },
+        "studentId": { "type": "string" },
+        "title": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "classLevel": { "type": "string" },
+        "room": { "type": "string" },
+        "classKey": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "studentNumber", "studentId", "firstName", "lastName", "classKey"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Academic subject curriculum",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "credits": { "type": "number" },
+        "hoursPerSemester": { "type": "number" },
+        "classKey": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "type": { "type": "string" },
+        "semester": { "type": "number" },
+        "academicYear": { "type": "string" }
+      },
+      "required": ["id", "code", "name", "credits", "classKey"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Graded evaluation task or assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "name": { "type": "string" },
+        "maxScore": { "type": "number" },
+        "weight": { "type": "number" },
+        "category": { "type": "string" },
+        "semester": { "type": "number" },
+        "academicYear": { "type": "string" }
+      },
+      "required": ["id", "subjectId", "name", "maxScore", "category"]
+    },
+    "Score": {
+      "title": "StudentSubjectScore",
+      "description": "Student grading and assessment records per subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "number" },
+        "assignmentScores": { "type": "object" },
+        "midtermScore": { "type": "number" },
+        "finalScore": { "type": "number" },
+        "totalScore": { "type": "number" },
+        "grade": { "type": "string" },
+        "evaluationStatus": { "type": "string" }
+      },
+      "required": ["id", "studentId", "subjectId", "totalScore", "grade"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Teacher, admin, staff user record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" },
+        "subjectSpecialty": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Attendance": {
+      "title": "StudentAttendanceRecord",
+      "description": "Daily attendance records for students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "classKey": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "number" },
+        "month": { "type": "number" },
+        "days": { "type": "object" },
+        "attendanceRate": { "type": "number" }
+      },
+      "required": ["id", "studentId", "subjectId", "classKey", "month"]
+    },
+    "SchoolSettings": {
+      "title": "SchoolSettings",
+      "description": "School information and general settings",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string" },
+        "schoolNameEn": { "type": "string" },
+        "affiliation": { "type": "string" },
+        "province": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "currentSemester": { "type": "number" },
+        "directorName": { "type": "string" },
+        "evaluationNote": { "type": "string" }
+      },
+      "required": ["schoolName", "academicYear", "currentSemester"]
+    }
+  },
+  "firestore": {
+    "students": {
+      "entity": "Student",
+      "description": "Collection of all students in the school"
+    },
+    "subjects": {
+      "entity": "Subject",
+      "description": "Collection of all subjects"
+    },
+    "assignments": {
+      "entity": "Assignment",
+      "description": "Collection of all assignments and tests"
+    },
+    "scores": {
+      "entity": "Score",
+      "description": "Collection of student scores and grades"
+    },
+    "users": {
+      "entity": "User",
+      "description": "Collection of users and teachers"
+    },
+    "attendance": {
+      "entity": "Attendance",
+      "description": "Collection of attendance sheets"
+    },
+    "settings": {
+      "entity": "SchoolSettings",
+      "description": "School system settings"
+    }
+  }
+}

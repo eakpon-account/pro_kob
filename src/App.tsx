@@ -48,7 +48,7 @@ import {
   User 
 } from './types';
 import { storage } from './services/storage';
-import { Menu, Plus, Database, Sparkles, Award, UserCheck, ShieldCheck, LogIn, ArrowRightLeft, Settings } from 'lucide-react';
+import { Menu, Plus, Database, Sparkles, Award, UserCheck, ShieldCheck, LogIn, ArrowRightLeft, Settings, Cloud, RefreshCw } from 'lucide-react';
 import { MainTabType } from './components/Navbar';
 
 export default function App() {
@@ -65,6 +65,8 @@ export default function App() {
   const [scores, setScores] = useState<StudentSubjectScore[]>(() => storage.getScores());
   const [firebaseStatus, setFirebaseStatus] = useState(() => storage.getFirebaseStatus());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
 
   // Deep Link Selection from Dashboard to Grading
   const [targetGradingSubjectId, setTargetGradingSubjectId] = useState<string | undefined>(undefined);
@@ -97,6 +99,37 @@ export default function App() {
     setCurrentUser(storage.getCurrentUser());
     setFirebaseStatus(storage.getFirebaseStatus());
   }, []);
+
+  // Sync data with Firebase Firestore
+  const syncWithCloud = useCallback(async (showFeedback = false) => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await storage.pullAllDataFromFirebase();
+      if (res.success) {
+        reloadAllData();
+        if (showFeedback) {
+          setSyncToast(
+            res.isEmptyRemote
+              ? 'ส่งข้อมูลเริ่มต้นขึ้น Cloud Firestore เรียบร้อยแล้ว'
+              : `ซิงค์ดึงข้อมูลล่าสุดจาก Cloud สำเร็จ (นักเรียน ${res.counts.students} คน, วิชา ${res.counts.subjects} วิชา)`
+          );
+          setTimeout(() => setSyncToast(null), 4000);
+        }
+      } else if (showFeedback && res.error) {
+        setSyncToast(`ไม่สามารถซิงค์ได้: ${res.error}`);
+        setTimeout(() => setSyncToast(null), 4000);
+      }
+    } catch (err: any) {
+      console.error('Cloud sync error:', err);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  }, [reloadAllData]);
+
+  // Initial cloud sync on app start
+  useEffect(() => {
+    syncWithCloud(false);
+  }, [syncWithCloud]);
 
   const handleUserChange = (newUser: User) => {
     storage.setCurrentUser(newUser);
@@ -206,6 +239,24 @@ export default function App() {
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 ml-auto">
             
+            {/* Cloud Sync Status & Quick Pull Button */}
+            <button
+              onClick={() => syncWithCloud(true)}
+              disabled={isSyncingCloud}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                firebaseStatus.connected
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+              }`}
+              title={firebaseStatus.connected ? 'คลิกเพื่อซิงค์ดึงข้อมูลล่าสุดจาก Cloud Firestore' : 'ยังไม่ได้เชื่อมต่อ Firebase'}
+            >
+              <Cloud className={`w-3.5 h-3.5 ${firebaseStatus.connected ? 'text-emerald-600' : 'text-amber-600'}`} />
+              <RefreshCw className={`w-3 h-3 ${isSyncingCloud ? 'animate-spin text-emerald-600' : 'opacity-70'}`} />
+              <span className="hidden sm:inline">
+                {isSyncingCloud ? 'กำลังซิงค์...' : firebaseStatus.connected ? 'ซิงค์ Cloud' : 'เชื่อมต่อคลาวด์'}
+              </span>
+            </button>
+
             {/* Current Active User Pill with Login / Switch Modal Trigger */}
             <button
               onClick={() => setShowLoginModal(true)}
@@ -245,6 +296,22 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* Sync Toast Notification */}
+        {syncToast && (
+          <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs animate-fadeIn shrink-0">
+            <div className="flex items-center gap-2">
+              <Cloud className="w-4 h-4 shrink-0" />
+              <span>{syncToast}</span>
+            </div>
+            <button 
+              onClick={() => setSyncToast(null)}
+              className="text-emerald-200 hover:text-white text-xs px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Scrollable View Container */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">

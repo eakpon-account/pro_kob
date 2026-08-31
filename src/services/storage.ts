@@ -2,6 +2,7 @@ import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus } from '../types';
 import { INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, INITIAL_USERS, generateInitialScores, generateInitialStudents } from './mockData';
+import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 /**
  * ป้องกันปัญหารหัส Document ID ใน Firestore ที่มีเครื่องหมาย '/' (เช่น ป.3/1, ม.1/1)
@@ -138,6 +139,23 @@ class StorageService {
 
   public tryInitFirebaseFromStorage(): boolean {
     try {
+      // 1. First priority: Check auto-provisioned Firebase applet config
+      if (firebaseAppletConfig && firebaseAppletConfig.apiKey && firebaseAppletConfig.projectId) {
+        const autoConfig: FirebaseCustomConfig = {
+          apiKey: firebaseAppletConfig.apiKey,
+          projectId: firebaseAppletConfig.projectId,
+          authDomain: firebaseAppletConfig.authDomain || undefined,
+          storageBucket: firebaseAppletConfig.storageBucket || undefined,
+          messagingSenderId: firebaseAppletConfig.messagingSenderId || undefined,
+          appId: firebaseAppletConfig.appId || undefined,
+        };
+        const ok = this.initFirebase(autoConfig);
+        if (ok) {
+          return true;
+        }
+      }
+
+      // 2. Second priority: Check custom stored config in localStorage
       const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
       if (storedConfig) {
         const config: FirebaseCustomConfig = JSON.parse(storedConfig);
@@ -170,6 +188,10 @@ class StorageService {
   }
 
   public getFirebaseStatus(): { connected: boolean; projectId?: string } {
+    if (this.firebaseConnected && this.app) {
+      const projId = this.app.options.projectId || firebaseAppletConfig?.projectId;
+      return { connected: true, projectId: projId };
+    }
     const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
     if (storedConfig) {
       try {
@@ -180,6 +202,228 @@ class StorageService {
       }
     }
     return { connected: this.firebaseConnected };
+  }
+
+  /**
+   * ดึงข้อมูลทั้งหมดจาก Cloud Firestore มายังเครื่องนี้
+   * เพื่อให้เครื่องอื่นๆ ที่เข้าใช้งานระบบสามารถเห็นและทำงานบนชุดข้อมูลจริงเดียวกัน
+   */
+  public async pullAllDataFromFirebase(): Promise<{
+    success: boolean;
+    counts: {
+      students: number;
+      subjects: number;
+      assignments: number;
+      scores: number;
+      users: number;
+      attendance: number;
+    };
+    isEmptyRemote?: boolean;
+    error?: string;
+  }> {
+    if (!this.db || !this.firebaseConnected) {
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return {
+          success: false,
+          counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0 },
+          error: 'ยังไม่ได้เชื่อมต่อฐานข้อมูล Firebase Firestore',
+        };
+      }
+    }
+
+    try {
+      const [
+        studentsSnap,
+        subjectsSnap,
+        assignmentsSnap,
+        scoresSnap,
+        attendanceSnap,
+        usersSnap,
+        settingsSnap,
+      ] = await Promise.all([
+        getDocs(collection(this.db, 'students')),
+        getDocs(collection(this.db, 'subjects')),
+        getDocs(collection(this.db, 'assignments')),
+        getDocs(collection(this.db, 'scores')),
+        getDocs(collection(this.db, 'attendance')),
+        getDocs(collection(this.db, 'users')),
+        getDocs(collection(this.db, 'settings')),
+      ]);
+
+      const totalRemoteDocs =
+        studentsSnap.size +
+        subjectsSnap.size +
+        assignmentsSnap.size +
+        scoresSnap.size +
+        attendanceSnap.size +
+        usersSnap.size;
+
+      // หากบน Cloud Firestore ยังว่างเปล่า (เพิ่งสร้าง Database ใหม่) ให้อัปโหลดข้อมูลตั้งต้นขึ้น Cloud
+      if (totalRemoteDocs === 0) {
+        console.log('Cloud Firestore is empty, auto seeding current dataset to Cloud...');
+        await this.syncAllLocalDataToFirebase();
+        return {
+          success: true,
+          isEmptyRemote: true,
+          counts: {
+            students: this.getStudents().length,
+            subjects: this.getSubjects().length,
+            assignments: this.getAssignments().length,
+            scores: this.getScores().length,
+            users: this.getUsers().length,
+            attendance: this.getAttendanceRecords().length,
+          },
+        };
+      }
+
+      // หากบน Cloud มีข้อมูล ให้อัปเดตลงเครื่องนี้ เพื่อให้ทุกเครื่องแสดงข้อมูลตรงกัน
+      if (!studentsSnap.empty) {
+        const remoteStudents: Student[] = [];
+        studentsSnap.forEach((d) => remoteStudents.push(d.data() as Student));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(remoteStudents));
+      }
+
+      if (!subjectsSnap.empty) {
+        const remoteSubjects: Subject[] = [];
+        subjectsSnap.forEach((d) => remoteSubjects.push(d.data() as Subject));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SUBJECTS, JSON.stringify(remoteSubjects));
+      }
+
+      if (!assignmentsSnap.empty) {
+        const remoteAssignments: Assignment[] = [];
+        assignmentsSnap.forEach((d) => remoteAssignments.push(d.data() as Assignment));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(remoteAssignments));
+      }
+
+      if (!scoresSnap.empty) {
+        const remoteScores: StudentSubjectScore[] = [];
+        scoresSnap.forEach((d) => remoteScores.push(d.data() as StudentSubjectScore));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(remoteScores));
+      }
+
+      if (!attendanceSnap.empty) {
+        const remoteAttendance: StudentAttendanceRecord[] = [];
+        attendanceSnap.forEach((d) => remoteAttendance.push(d.data() as StudentAttendanceRecord));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(remoteAttendance));
+      }
+
+      if (!usersSnap.empty) {
+        const remoteUsers: User[] = [];
+        usersSnap.forEach((d) => remoteUsers.push(d.data() as User));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(remoteUsers));
+      }
+
+      if (!settingsSnap.empty) {
+        settingsSnap.forEach((d) => {
+          if (d.id === 'school_settings') {
+            localStorage.setItem(LOCAL_STORAGE_KEYS.SCHOOL_SETTINGS, JSON.stringify(d.data()));
+          }
+        });
+      }
+
+      return {
+        success: true,
+        counts: {
+          students: studentsSnap.size,
+          subjects: subjectsSnap.size,
+          assignments: assignmentsSnap.size,
+          scores: scoresSnap.size,
+          attendance: attendanceSnap.size,
+          users: usersSnap.size,
+        },
+      };
+    } catch (err: any) {
+      console.error('Error pulling data from Firebase Firestore:', err);
+      return {
+        success: false,
+        counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0 },
+        error: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Cloud Firestore',
+      };
+    }
+  }
+
+  /**
+   * นำข้อมูลทั้งหมดในระบบปัจจุบัน (นักเรียน, รายวิชา, ใบงาน, คะแนน, ผู้ใช้งาน, การเช็คชื่อ, การตั้งค่า)
+   * ส่งขึ้นไปยัง Cloud Firestore ในครั้งเดียว (Sync All Data to Firebase)
+   */
+  public async syncAllLocalDataToFirebase(): Promise<{
+    success: boolean;
+    counts: {
+      students: number;
+      subjects: number;
+      assignments: number;
+      scores: number;
+      users: number;
+      attendance: number;
+      settings: number;
+    };
+    error?: string;
+  }> {
+    if (!this.db || !this.firebaseConnected) {
+      // Try init first
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return {
+          success: false,
+          counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0, settings: 0 },
+          error: 'ยังไม่ได้เชื่อมต่อฐานข้อมูล Firebase Firestore',
+        };
+      }
+    }
+
+    try {
+      const students = this.getStudents();
+      const subjects = this.getSubjects();
+      const assignments = this.getAssignments();
+      const scores = this.getScores();
+      const users = this.getUsers();
+      const attendance = this.getAttendanceRecords();
+      const settings = this.getSchoolSettings();
+
+      // Chunk write batches (Firestore has 500 operations per batch limit)
+      const allOperations: Array<{ collection: string; id: string; data: any }> = [];
+
+      students.forEach((s) => allOperations.push({ collection: 'students', id: sanitizeDocId(s.id), data: s }));
+      subjects.forEach((s) => allOperations.push({ collection: 'subjects', id: sanitizeDocId(s.id), data: s }));
+      assignments.forEach((a) => allOperations.push({ collection: 'assignments', id: sanitizeDocId(a.id), data: a }));
+      scores.forEach((sc) => allOperations.push({ collection: 'scores', id: sanitizeDocId(sc.id), data: sc }));
+      users.forEach((u) => allOperations.push({ collection: 'users', id: sanitizeDocId(u.id), data: u }));
+      attendance.forEach((att) => allOperations.push({ collection: 'attendance', id: sanitizeDocId(att.id), data: att }));
+      allOperations.push({ collection: 'settings', id: 'school_settings', data: settings });
+
+      // Execute batches in chunks of 400
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < allOperations.length; i += CHUNK_SIZE) {
+        const chunk = allOperations.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(this.db!);
+        chunk.forEach((op) => {
+          const docRef = doc(this.db!, op.collection, op.id);
+          batch.set(docRef, cleanForFirestore(op.data), { merge: true });
+        });
+        await batch.commit();
+      }
+
+      return {
+        success: true,
+        counts: {
+          students: students.length,
+          subjects: subjects.length,
+          assignments: assignments.length,
+          scores: scores.length,
+          users: users.length,
+          attendance: attendance.length,
+          settings: 1,
+        },
+      };
+    } catch (err: any) {
+      console.error('Failed to sync all local data to Firebase:', err);
+      return {
+        success: false,
+        counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0, settings: 0 },
+        error: err.message || 'เกิดข้อผิดพลาดในการนำข้อมูลขึ้น Firebase',
+      };
+    }
   }
 
   // --- USER AUTHENTICATION & SESSIONS ---
@@ -210,6 +454,10 @@ class StorageService {
     if (currentUser.id === user.id) {
       this.setCurrentUser(user);
     }
+
+    if (this.db && this.firebaseConnected) {
+      setDoc(doc(this.db, 'users', sanitizeDocId(user.id)), cleanForFirestore(user)).catch(console.error);
+    }
   }
 
   public deleteUser(userId: string): { success: boolean; message?: string } {
@@ -234,6 +482,10 @@ class StorageService {
     const current = this.getCurrentUser();
     if (current.id === userId) {
       this.setCurrentUser(filtered[0] || INITIAL_USERS[0]);
+    }
+
+    if (this.db && this.firebaseConnected) {
+      deleteDoc(doc(this.db, 'users', sanitizeDocId(userId))).catch(console.error);
     }
 
     return { success: true };
@@ -735,6 +987,11 @@ class StorageService {
     const current = this.getSchoolSettings();
     const updated = { ...current, ...settings };
     localStorage.setItem(LOCAL_STORAGE_KEYS.SCHOOL_SETTINGS, JSON.stringify(updated));
+
+    if (this.db && this.firebaseConnected) {
+      setDoc(doc(this.db, 'settings', 'school_settings'), cleanForFirestore(updated)).catch(console.error);
+    }
+
     return updated;
   }
 }
