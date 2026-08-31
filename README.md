@@ -81,12 +81,23 @@ docker compose up -d --build
 - คอมไพล์โปรเจกต์และอัปโหลดขึ้น **GitHub Pages** โดยไม่ต้องตั้งค่า Server ใดๆ เพิ่มเติม
 
 #### ⚙️ ขั้นตอนการเปิดใช้งาน GitHub Pages ใน Repository:
-1. ไปที่ **Settings** ของ Repository บน GitHub
-2. เลือกเมนู **Pages** (ในแถบซ้ายมือ)
-3. ภายใต้หัวข้อ **Build and deployment > Source**:
-   - เลือก **GitHub Actions**
-4. เมื่อ Push โค้ดขึ้นกิ่ง `main` ระบบจะทำการ Deploy เว็บให้พร้อมเข้าใช้งานได้ทันทีที่ URL:
+1. ไปที่แท็บ **Settings** ของ Repository บน GitHub
+2. เลือกเมนู **Pages** (ในแถบเมนูด้านซ้าย)
+3. ภายใต้หัวข้อ **Build and deployment**:
+   - ช่อง **Source**: ให้เปลี่ยนจาก `Deploy from a branch` เป็น **`GitHub Actions`** (สำคัญมาก!)
+4. ไปที่แท็บ **Actions** ใน GitHub จะพบ Workflow `Deploy to GitHub Pages` กำลังทำงาน และเมื่อเสร็จสิ้นจะแสดง URL สำหรับเข้าใช้งานทันที:
    `https://<your-username>.github.io/<your-repo-name>/`
+
+---
+
+## 🔍 วิธีแก้ไขปัญหาหากยังแสดงผลไม่ได้บน GitHub (Troubleshooting)
+
+| ปัญหาที่พบ | สาเหตุ | วิธีแก้ไข |
+| :--- | :--- | :--- |
+| **หน้าเว็บขึ้น 404 Not Found** | ยังไม่ได้เปลี่ยน Source เป็น GitHub Actions | ไปที่ **Settings > Pages > Source** แล้วเลือกเป็น **GitHub Actions** |
+| **หน้าเว็บขาว (Blank Screen) หรือโหลด CSS/JS ไม่ขึ้น** | Base Path ใน Vite ไม่ถูกต้อง | โปรเจกต์นี้ตั้งค่า `base: './'` ไว้ใน `vite.config.ts` แล้ว ทำให้รองรับทุก Subpath ของ GitHub Pages อัตโนมัติ |
+| **Workflow ใน Actions ล้มเหลว (Failed)** | สิทธิ์ของ Workflow ไม่เพียงพอ | ไปที่ **Settings > Actions > General > Workflow permissions** แล้วเลือก **Read and write permissions** |
+| **ต้องการสั่ง Deploy ใหม่อีกครั้งทันที** | - | ไปที่แท็บ **Actions > Deploy to GitHub Pages > Run workflow** แล้วกดปุ่มสีเขียว |
 
 ---
 
