@@ -1,5 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus } from '../types';
 import { INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, INITIAL_USERS, generateInitialScores, generateInitialStudents } from './mockData';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
@@ -177,6 +178,16 @@ class StorageService {
         this.app = initializeApp(config);
       }
       this.db = getFirestore(this.app);
+      try {
+        const auth = getAuth(this.app);
+        if (!auth.currentUser) {
+          signInAnonymously(auth).catch((authErr) => {
+            console.warn('Anonymous auth note (unauthenticated access permitted by rules):', authErr);
+          });
+        }
+      } catch (authErr) {
+        // Ignore auth init error if unauthenticated access is used
+      }
       this.firebaseConnected = true;
       localStorage.setItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(config));
       return true;
@@ -184,6 +195,18 @@ class StorageService {
       console.error('Firebase initialization failed:', err);
       this.firebaseConnected = false;
       return false;
+    }
+  }
+
+  public async ensureAuth(): Promise<void> {
+    if (!this.app) return;
+    try {
+      const auth = getAuth(this.app);
+      if (!auth.currentUser) {
+        await signInAnonymously(auth);
+      }
+    } catch (e) {
+      // ignore
     }
   }
 
@@ -233,6 +256,7 @@ class StorageService {
     }
 
     try {
+      await this.ensureAuth();
       const [
         studentsSnap,
         subjectsSnap,
@@ -373,6 +397,7 @@ class StorageService {
     }
 
     try {
+      await this.ensureAuth();
       const students = this.getStudents();
       const subjects = this.getSubjects();
       const assignments = this.getAssignments();
