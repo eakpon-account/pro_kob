@@ -13,7 +13,10 @@ import {
   School,
   FileSpreadsheet,
   X,
-  Plus
+  Plus,
+  Cloud,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { Student } from '../types';
 import { storage } from '../services/storage';
@@ -41,6 +44,8 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [showImportModal, setShowImportModal] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'deleted' | 'error'; text: string; subText?: string } | null>(null);
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [isSeedingFirebase, setIsSeedingFirebase] = useState(false);
 
   // Form State for Single Add/Edit
   const [formPrefix, setFormPrefix] = useState('ด.ช.');
@@ -241,20 +246,81 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
     XLSX.writeFile(wb, 'รายชื่อนักเรียนทั้งหมด.xlsx');
   };
 
+  // Pull directly from Firebase Firestore Database
+  const handlePullFromFirebase = async () => {
+    setIsSyncingFirebase(true);
+    try {
+      const res = await storage.fetchStudentsDirectlyFromFirebase();
+      if (res.success) {
+        onUpdateStudents(res.students);
+        setStatusMessage({
+          type: 'success',
+          text: `ดึงข้อมูลนักเรียนจากฐานข้อมูล Firebase สำเร็จ`,
+          subText: `พบข้อมูลนักเรียนทั้งหมด ${res.count} คน จาก Cloud Firestore`,
+        });
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: `ไม่สามารถดึงข้อมูลจาก Firebase ได้`,
+          subText: res.error,
+        });
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: `เกิดข้อผิดพลาดในการดึงข้อมูล`,
+        subText: err.message,
+      });
+    } finally {
+      setIsSyncingFirebase(false);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
+  // Create / Seed all students into Firebase Firestore Database
+  const handleSeedToFirebase = async () => {
+    setIsSeedingFirebase(true);
+    try {
+      const res = await storage.createAndSeedStudentsInFirebase(students);
+      if (res.success) {
+        setStatusMessage({
+          type: 'success',
+          text: `บันทึก/สร้างฐานข้อมูลรายชื่อนักเรียนใน Firebase สำเร็จแล้ว!`,
+          subText: `เขียนข้อมูลนักเรียนจำนวน ${res.count} คน ลงใน Cloud Firestore เรียบร้อย`,
+        });
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: `ไม่สามารถสร้างฐานข้อมูลใน Firebase ได้`,
+          subText: res.error,
+        });
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: `เกิดข้อผิดพลาดในการสร้างฐานข้อมูล`,
+        subText: err.message,
+      });
+    } finally {
+      setIsSeedingFirebase(false);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12">
       
       {/* Status Notification Banner */}
       {statusMessage && (
         <div className={`p-4 rounded-xl border flex items-center justify-between animate-in fade-in duration-200 ${
-          statusMessage.type === 'deleted' 
+          statusMessage.type === 'deleted' || statusMessage.type === 'error'
             ? 'bg-rose-50 border-rose-200 text-rose-800'
             : 'bg-emerald-50 border-emerald-200 text-emerald-800'
         }`}>
           <div className="flex items-center gap-2.5">
-            {statusMessage.type === 'deleted' ? (
+            {statusMessage.type === 'deleted' || statusMessage.type === 'error' ? (
               <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                <Trash2 className="w-4 h-4" />
+                <AlertCircle className="w-4 h-4" />
               </div>
             ) : (
               <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
@@ -277,6 +343,53 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           </button>
         </div>
       )}
+
+      {/* Firebase Database Connection Card */}
+      <div className="bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-emerald-50/60 p-4 rounded-2xl border border-blue-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs shrink-0">
+            <Database className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-bold text-slate-800">
+                ฐานข้อมูลนักเรียนบน Firebase Cloud Firestore
+              </h3>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                ออนไลน์ ({students.length} คน)
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              คอลเลกชัน <code className="font-mono bg-white/70 px-1 py-0.5 rounded border border-slate-200 text-blue-700 font-semibold">students</code> ใน Database ID: <code className="font-mono bg-white/70 px-1 py-0.5 rounded border border-slate-200 text-slate-700">ai-studio-d4633333-d76b-4d4e-8613-ec16f64ea578</code>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handlePullFromFirebase}
+            disabled={isSyncingFirebase || isSeedingFirebase}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            title="ดึงข้อมูลนักเรียนล่าสุดจาก Firebase Firestore"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFirebase ? 'animate-spin text-blue-600' : 'text-blue-500'}`} />
+            <span>{isSyncingFirebase ? 'กำลังดึงข้อมูล...' : 'ดึงรายชื่อจาก Firebase'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSeedToFirebase}
+            disabled={isSyncingFirebase || isSeedingFirebase}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 border border-blue-700 rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="สร้างหรือบันทึกข้อมูลรายชื่อนักเรียนทั้งหมดขึ้น Cloud Firestore"
+          >
+            <Cloud className={`w-3.5 h-3.5 ${isSeedingFirebase ? 'animate-bounce' : ''}`} />
+            <span>{isSeedingFirebase ? 'กำลังสร้าง/บันทึก...' : 'สร้างฐานข้อมูลใน Firebase'}</span>
+          </button>
+        </div>
+      </div>
 
       {/* Top Header & Action Controls */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">

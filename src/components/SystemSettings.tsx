@@ -542,24 +542,46 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
             </p>
           </div>
 
-          {/* Status Alert */}
-          <div className={`p-4 rounded-xl border flex items-start gap-3 ${
-            firebaseStatus.connected 
-              ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-              : 'bg-slate-50 border-slate-200 text-slate-700'
-          }`}>
-            <div className={`p-2 rounded-lg ${firebaseStatus.connected ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-              <Cloud className="w-5 h-5" />
+          {/* Status Alert & Database ID Notice */}
+          <div className="space-y-3">
+            <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+              firebaseStatus.connected 
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}>
+              <div className={`p-2 rounded-lg ${firebaseStatus.connected ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                <Cloud className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold">
+                  {firebaseStatus.connected ? 'เชื่อมต่อฐานข้อมูลคลาวด์สำเร็จ (Firebase Connected)' : 'ปัจจุบันทำงานในโหมด Offline (จัดเก็บในเครื่อง)'}
+                </h4>
+                <p className="text-[11px] mt-0.5 opacity-90">
+                  {firebaseStatus.connected 
+                    ? `โครงการ: ${firebaseStatus.projectId || 'my-project-1505207518592'} | Database ID: ai-studio-d4633333-d76b-4d4e-8613-ec16f64ea578`
+                    : 'ข้อมูลจะถูกบันทึกลงใน LocalStorage ของเบราว์เซอร์นี้ หากต้องการใช้งานร่วมกันหลายเครื่อง ให้กรอกค่า Firebase Configuration ด้านล่าง'}
+                </p>
+              </div>
             </div>
-            <div className="flex-1">
-              <h4 className="text-xs font-bold">
-                {firebaseStatus.connected ? 'เชื่อมต่อฐานข้อมูลคลาวด์สำเร็จ (Firebase Connected)' : 'ปัจจุบันทำงานในโหมด Offline (จัดเก็บในเครื่อง)'}
-              </h4>
-              <p className="text-[11px] mt-0.5 opacity-90">
-                {firebaseStatus.connected 
-                  ? `โครงการ: ${firebaseStatus.projectId || 'พร้อมใช้งาน'} — ข้อมูลรายวิชา คะแนน และนักเรียนจะถูกซิงค์ไปยัง Firestore อัตโนมัติ`
-                  : 'ข้อมูลจะถูกบันทึกลงใน LocalStorage ของเบราว์เซอร์นี้ หากต้องการใช้งานร่วมกันหลายเครื่อง ให้กรอกค่า Firebase Configuration ด้านล่าง'}
+
+            {/* Explanation card for why users might not see data in console */}
+            <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-900 text-xs space-y-2">
+              <div className="flex items-center gap-2 font-bold text-blue-800">
+                <Info className="w-4 h-4 text-blue-600" />
+                <span>📌 คำแนะนำสำคัญ: การเปิดดูข้อมูลนักเรียนใน Firebase Console</span>
+              </div>
+              <p className="leading-relaxed text-blue-950">
+                โปรเจกต์นี้ใช้ฐานข้อมูล Firestore Database ชื่อเฉพาะคือ: <code className="bg-blue-200/70 text-blue-900 px-1.5 py-0.5 rounded font-mono font-bold">ai-studio-d4633333-d76b-4d4e-8613-ec16f64ea578</code>
               </p>
+              <div className="bg-white/80 p-3 rounded-lg border border-blue-200 space-y-1.5 text-[11px] text-blue-900">
+                <p className="font-semibold text-blue-950">หากคุณเข้าไปดูใน Firebase Console แล้วไม่เห็น Collection หรือรายชื่อนักเรียน:</p>
+                <ol className="list-decimal list-inside space-y-1 pl-1">
+                  <li>เปิดหน้า <b>Firestore Database</b> ใน Firebase Console</li>
+                  <li>สังเกตแถบดรอปดาวน์เลือกฐานข้อมูลด้านบน (มุมซ้ายบนของหน้า Firestore) ที่ปกติจะแสดง <b>(default)</b></li>
+                  <li>ให้คลิกเปลี่ยนจาก <b>(default)</b> เป็น <b>ai-studio-d4633333-d76b-4d4e-8613-ec16f64ea578</b> จะพบข้อมูล <code className="font-mono bg-blue-100 px-1 rounded">students</code>, <code className="font-mono bg-blue-100 px-1 rounded">subjects</code>, <code className="font-mono bg-blue-100 px-1 rounded">scores</code> ครบถ้วน</li>
+                  <li>หากต้องการอัปโหลดข้อมูลจากหน้าเว็บนี้ขึ้นไปใหม่ทั้งหมด ให้กดปุ่ม <b>"ส่งข้อมูลทั้งหมดขึ้น Cloud เดี๋ยวนี้"</b> ด้านล่างนี้</li>
+                </ol>
+              </div>
             </div>
           </div>
 

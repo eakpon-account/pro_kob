@@ -114,13 +114,13 @@ export default function App() {
           setSyncToast(
             res.isEmptyRemote
               ? 'ส่งข้อมูลเริ่มต้นขึ้น Cloud Firestore เรียบร้อยแล้ว'
-              : `ซิงค์ดึงข้อมูลล่าสุดจาก Cloud สำเร็จ (นักเรียน ${res.counts.students} คน, วิชา ${res.counts.subjects} วิชา)`
+              : `ดึงข้อมูลล่าสุดจาก Cloud Firestore สำเร็จ (นักเรียน ${res.counts.students} คน, วิชา ${res.counts.subjects} วิชา, คะแนน ${res.counts.scores} รายการ)`
           );
-          setTimeout(() => setSyncToast(null), 4000);
+          setTimeout(() => setSyncToast(null), 4500);
         }
       } else if (showFeedback && res.error) {
-        setSyncToast(`ไม่สามารถซิงค์ได้: ${res.error}`);
-        setTimeout(() => setSyncToast(null), 4000);
+        setSyncToast(`การดึงข้อมูลจาก Cloud: ${res.error}`);
+        setTimeout(() => setSyncToast(null), 5000);
       }
     } catch (err: any) {
       console.error('Cloud sync error:', err);
@@ -129,10 +129,21 @@ export default function App() {
     }
   }, [reloadAllData]);
 
-  // Initial cloud sync on app start
+  // Initial cloud sync on app start and attach live real-time Firestore listeners
   useEffect(() => {
+    // 1. Initial pull
     syncWithCloud(false);
-  }, [syncWithCloud]);
+
+    // 2. Real-time live listener for Firestore changes across all devices/sessions
+    const unsubscribe = storage.subscribeToLiveCloudUpdates((dataType) => {
+      console.log(`[Firebase Live Sync] Data updated from Cloud: ${dataType}`);
+      reloadAllData();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [syncWithCloud, reloadAllData]);
 
   const handleUserChange = (newUser: User) => {
     storage.setCurrentUser(newUser);

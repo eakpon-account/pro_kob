@@ -1,5 +1,5 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus } from '../types';
 import { INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, INITIAL_USERS, generateInitialScores, generateInitialStudents } from './mockData';
@@ -504,6 +504,113 @@ class StorageService {
   }
 
   /**
+   * ติดตามการเปลี่ยนแปลงข้อมูลจาก Cloud Firestore แบบเรียลไทม์ (Live Firestore Listener)
+   * เมื่อมีการบันทึกคะแนน เพิ่มนักเรียน หรือแก้ไขวิชาจากเครื่องใดๆ จะอัปเดตข้อมูลบนหน้าจอทันที
+   */
+  public subscribeToLiveCloudUpdates(onUpdate: (type: string) => void): () => void {
+    if (!this.db || !this.firebaseConnected) {
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return () => {};
+      }
+    }
+
+    const unsubscribers: Unsubscribe[] = [];
+
+    try {
+      // 1. Listen to Students
+      const unsubStudents = onSnapshot(collection(this.db!, 'students'), (snap) => {
+        if (!snap.empty) {
+          const list: Student[] = [];
+          snap.forEach((d) => list.push(d.data() as Student));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(list));
+          onUpdate('students');
+        }
+      }, (err) => console.warn('Students live sync warning:', err));
+      unsubscribers.push(unsubStudents);
+
+      // 2. Listen to Subjects
+      const unsubSubjects = onSnapshot(collection(this.db!, 'subjects'), (snap) => {
+        if (!snap.empty) {
+          const list: Subject[] = [];
+          snap.forEach((d) => list.push(d.data() as Subject));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.SUBJECTS, JSON.stringify(list));
+          onUpdate('subjects');
+        }
+      }, (err) => console.warn('Subjects live sync warning:', err));
+      unsubscribers.push(unsubSubjects);
+
+      // 3. Listen to Assignments
+      const unsubAsgs = onSnapshot(collection(this.db!, 'assignments'), (snap) => {
+        if (!snap.empty) {
+          const list: Assignment[] = [];
+          snap.forEach((d) => list.push(d.data() as Assignment));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(list));
+          onUpdate('assignments');
+        }
+      }, (err) => console.warn('Assignments live sync warning:', err));
+      unsubscribers.push(unsubAsgs);
+
+      // 4. Listen to Scores
+      const unsubScores = onSnapshot(collection(this.db!, 'scores'), (snap) => {
+        if (!snap.empty) {
+          const list: StudentSubjectScore[] = [];
+          snap.forEach((d) => list.push(d.data() as StudentSubjectScore));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(list));
+          onUpdate('scores');
+        }
+      }, (err) => console.warn('Scores live sync warning:', err));
+      unsubscribers.push(unsubScores);
+
+      // 5. Listen to Attendance
+      const unsubAttendance = onSnapshot(collection(this.db!, 'attendance'), (snap) => {
+        if (!snap.empty) {
+          const list: StudentAttendanceRecord[] = [];
+          snap.forEach((d) => list.push(d.data() as StudentAttendanceRecord));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(list));
+          onUpdate('attendance');
+        }
+      }, (err) => console.warn('Attendance live sync warning:', err));
+      unsubscribers.push(unsubAttendance);
+
+      // 6. Listen to Users
+      const unsubUsers = onSnapshot(collection(this.db!, 'users'), (snap) => {
+        if (!snap.empty) {
+          const list: User[] = [];
+          snap.forEach((d) => list.push(d.data() as User));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(list));
+          onUpdate('users');
+        }
+      }, (err) => console.warn('Users live sync warning:', err));
+      unsubscribers.push(unsubUsers);
+
+      // 7. Listen to Settings
+      const unsubSettings = onSnapshot(collection(this.db!, 'settings'), (snap) => {
+        if (!snap.empty) {
+          snap.forEach((d) => {
+            if (d.id === 'school_settings') {
+              localStorage.setItem(LOCAL_STORAGE_KEYS.SCHOOL_SETTINGS, JSON.stringify(d.data()));
+              onUpdate('settings');
+            }
+          });
+        }
+      }, (err) => console.warn('Settings live sync warning:', err));
+      unsubscribers.push(unsubSettings);
+
+    } catch (e) {
+      console.warn('Could not setup realtime listeners:', e);
+    }
+
+    return () => {
+      unsubscribers.forEach((unsub) => {
+        try {
+          unsub();
+        } catch (e) {}
+      });
+    };
+  }
+
+  /**
    * นำข้อมูลทั้งหมดในระบบปัจจุบัน (นักเรียน, รายวิชา, ใบงาน, คะแนน, ผู้ใช้งาน, การเช็คชื่อ, การตั้งค่า)
    * ส่งขึ้นไปยัง Cloud Firestore ในครั้งเดียว (Sync All Data to Firebase)
    */
@@ -740,6 +847,109 @@ class StorageService {
     const students: Student[] = data ? JSON.parse(data) : [];
     // เรียงลำดับจากเลขที่น้อยไปหามากตามความต้องการ
     return students.sort((a, b) => a.studentNumber - b.studentNumber);
+  }
+
+  /**
+   * สร้างฐานข้อมูลรายชื่อนักเรียนและบันทึกลง Firebase Cloud Firestore
+   */
+  public async createAndSeedStudentsInFirebase(studentsToSeed?: Student[]): Promise<{
+    success: boolean;
+    count: number;
+    error?: string;
+  }> {
+    if (!this.db || !this.firebaseConnected) {
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return { success: false, count: 0, error: 'ยังไม่ได้เชื่อมต่อกับ Firebase' };
+      }
+    }
+
+    try {
+      await this.ensureAuth();
+      const listToSeed = (studentsToSeed && studentsToSeed.length > 0)
+        ? studentsToSeed
+        : (this.getStudents().length > 0 ? this.getStudents() : generateInitialStudents());
+
+      // Save locally first
+      this.bulkSaveStudents(listToSeed);
+
+      // Write in chunks to Firestore
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < listToSeed.length; i += CHUNK_SIZE) {
+        const chunk = listToSeed.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(this.db!);
+        chunk.forEach((st) => {
+          const docRef = doc(this.db!, 'students', sanitizeDocId(st.id));
+          batch.set(docRef, cleanForFirestore(st), { merge: true });
+        });
+        await batch.commit();
+      }
+
+      console.log(`[Firebase] Successfully seeded ${listToSeed.length} students to Firestore`);
+      return { success: true, count: listToSeed.length };
+    } catch (err: any) {
+      console.error('[Firebase] Failed to create/seed students in Firestore:', err);
+      return { success: false, count: 0, error: err?.message || 'ไม่สามารถสร้างข้อมูลนักเรียนบน Firebase ได้' };
+    }
+  }
+
+  /**
+   * ดึงรายชื่อนักเรียนจากฐานข้อมูล Firebase Cloud Firestore โดยตรง
+   */
+  public async fetchStudentsDirectlyFromFirebase(): Promise<{
+    success: boolean;
+    count: number;
+    students: Student[];
+    error?: string;
+  }> {
+    if (!this.db || !this.firebaseConnected) {
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return {
+          success: false,
+          count: this.getStudents().length,
+          students: this.getStudents(),
+          error: 'ยังไม่ได้เชื่อมต่อกับ Firebase',
+        };
+      }
+    }
+
+    try {
+      await this.ensureAuth();
+      const snap = await getDocs(collection(this.db!, 'students'));
+      if (snap.empty) {
+        // If empty in Firestore, automatically create the database on Firestore
+        console.log('[Firebase] Student collection in Firestore is empty. Auto-seeding students now...');
+        const seedResult = await this.createAndSeedStudentsInFirebase();
+        const current = this.getStudents();
+        return {
+          success: seedResult.success,
+          count: current.length,
+          students: current,
+          error: seedResult.error,
+        };
+      }
+
+      const remoteStudents: Student[] = [];
+      snap.forEach((d) => remoteStudents.push(d.data() as Student));
+      remoteStudents.sort((a, b) => a.studentNumber - b.studentNumber);
+
+      // Cache locally
+      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(remoteStudents));
+      return {
+        success: true,
+        count: remoteStudents.length,
+        students: remoteStudents,
+      };
+    } catch (err: any) {
+      console.error('[Firebase] Error fetching students from Firestore:', err);
+      return {
+        success: false,
+        count: this.getStudents().length,
+        students: this.getStudents(),
+        error: err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลนักเรียนจาก Firebase',
+      };
+    }
   }
 
   public saveStudent(student: Student): void {
