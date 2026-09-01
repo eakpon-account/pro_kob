@@ -9,6 +9,9 @@ import {
   ScoreGrading 
 } from './components/ScoreGrading';
 import { 
+  StudentEvaluation 
+} from './components/StudentEvaluation';
+import { 
   SubjectAttendance 
 } from './components/SubjectAttendance';
 import { 
@@ -348,6 +351,19 @@ export default function App() {
                 onOpenPrintModal={handleOpenPrintModal}
                 initialSubjectId={targetGradingSubjectId}
                 initialClassKey={targetGradingClassKey}
+              />
+            )}
+
+            {currentTab === 'evaluation' && (
+              <StudentEvaluation
+                students={students}
+                subjects={subjects}
+                assignments={assignments}
+                scores={scores}
+                onUpdateScores={setScores}
+                onUpdateAssignments={setAssignments}
+                preselectedSubjectId={targetGradingSubjectId}
+                preselectedClassKey={targetGradingClassKey}
               />
             )}
 

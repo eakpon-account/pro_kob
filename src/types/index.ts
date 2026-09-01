@@ -124,11 +124,12 @@ export interface ClassroomSummary {
 
 export interface FirebaseCustomConfig {
   apiKey: string;
-  authDomain: string;
   projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
+  authDomain?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  measurementId?: string;
 }
 
 export interface SchoolSettings {

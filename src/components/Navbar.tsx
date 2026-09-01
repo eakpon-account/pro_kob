@@ -28,14 +28,15 @@ import {
   Settings,
   School,
   AlertTriangle,
-  CalendarCheck
+  CalendarCheck,
+  ClipboardCheck
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { storage } from '../services/storage';
 import { ROLE_CONFIGS } from './UserManagement';
 import { SettingsTabId } from './SystemSettings';
 
-export type MainTabType = 'dashboard' | 'attendance' | 'grading' | 'students' | 'subjects' | 'settings' | 'users';
+export type MainTabType = 'dashboard' | 'attendance' | 'grading' | 'evaluation' | 'students' | 'subjects' | 'settings' | 'users';
 
 interface SidebarProps {
   currentTab: MainTabType;
@@ -189,6 +190,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <Award className={`w-4 h-4 ${currentTab === 'grading' ? 'text-emerald-600' : 'text-slate-400'}`} />
             <span>บันทึกคะแนนและตัดเกรด</span>
+          </button>
+
+          {/* Individual Student Evaluation (แบบบันทึกการประเมินนักเรียนรายบุคคล) */}
+          <button
+            id="nav-tab-evaluation"
+            onClick={() => handleNavClick('evaluation')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
+              currentTab === 'evaluation'
+                ? 'bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200 shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ClipboardCheck className={`w-4 h-4 ${currentTab === 'evaluation' ? 'text-indigo-600' : 'text-slate-400'}`} />
+              <span>ประเมินนักเรียนรายบุคคล</span>
+            </div>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+              ใหม่
+            </span>
           </button>
 
           {/* Students */}

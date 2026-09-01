@@ -1326,17 +1326,31 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                 </div>
               </div>
 
-              {/* Assignment Name */}
+              {/* Assignment Name / Topic */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  ชื่อรายการ / หัวข้อชิ้นงาน <span className="text-rose-500">*</span>
+                  หัวข้อ / ชื่อชิ้นงาน <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="เช่น ใบงานที่ 1 การคิดเชิงคำนวณ, สมุดการบ้านสัปดาห์ที่ 2, สอบท้ายบท"
+                  placeholder="เช่น การส่งงานตรงต่อเวลา, ทักษะการปฏิบัติงาน, ใบงานที่ 1, โครงงานกลุ่ม, สอบท้ายบท"
                   value={newAsgName}
                   onChange={(e) => setNewAsgName(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Description / Rubric Details */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  รายละเอียด / เกณฑ์การให้คะแนน (ถ้ามี)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="เช่น ส่งงานตรงเวลา เนื้อหาถูกต้องครบถ้วนตามเกณฑ์ หรือ คำอธิบาย Rubric"
+                  value={newAsgDescription}
+                  onChange={(e) => setNewAsgDescription(e.target.value)}
                   className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                 />
               </div>
@@ -1361,7 +1375,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
 
                   {/* Preset quick pills */}
                   <div className="flex items-center gap-1.5 ml-auto">
-                    {[10, 15, 20, 25, 30, 40, 50].map((score) => (
+                    {[5, 10, 15, 20, 25, 30, 40, 50, 100].map((score) => (
                       <button
                         key={score}
                         type="button"
@@ -1377,20 +1391,6 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                     ))}
                   </div>
                 </div>
-              </div>
-
-              {/* Description (Optional) */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  คำอธิบายเพิ่มเติม (ถ้ามี)
-                </label>
-                <input
-                  type="text"
-                  placeholder="เช่น สาระการเรียนรู้ที่ 1, กิจกรรมกลุ่ม"
-                  value={newAsgDescription}
-                  onChange={(e) => setNewAsgDescription(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none"
-                />
               </div>
 
               {/* Formula explanation box */}

@@ -52,6 +52,15 @@ const LOCAL_STORAGE_KEYS = {
   AUTH_SESSION: 'school_grading_auth_session_v2',
 };
 
+export const DEFAULT_FIREBASE_CONFIG: FirebaseCustomConfig = {
+  apiKey: "AIzaSyDtEeZJ0IuEh-U28va9XRZBXd4iVPnMhB4",
+  authDomain: "my-project-1505207518592.firebaseapp.com",
+  projectId: "my-project-1505207518592",
+  storageBucket: "my-project-1505207518592.firebasestorage.app",
+  messagingSenderId: "425941727917",
+  appId: "1:425941727917:web:b88a9baf3d21cbeb2ea424"
+};
+
 export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
   schoolName: 'โรงเรียนสาธิตวิทยาคม',
   schoolNameEn: 'Satit Wittayakom School',
@@ -138,9 +147,71 @@ class StorageService {
     }
   }
 
+  public parseFirebaseConfigSnippet(snippet: string): FirebaseCustomConfig | null {
+    if (!snippet || !snippet.trim()) return null;
+    try {
+      const trimmed = snippet.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.apiKey && parsed.projectId) {
+          return parsed;
+        }
+      }
+
+      const extract = (key: string): string => {
+        const regex = new RegExp(`['"]?${key}['"]?\\s*:\\s*['"\`]?([^'",\`\\n\\r}]+)['"\`]?`, 'i');
+        const match = snippet.match(regex);
+        return match ? match[1].trim() : '';
+      };
+
+      const apiKey = extract('apiKey');
+      const projectId = extract('projectId');
+      const authDomain = extract('authDomain');
+      const storageBucket = extract('storageBucket');
+      const messagingSenderId = extract('messagingSenderId');
+      const appId = extract('appId');
+      const measurementId = extract('measurementId');
+
+      if (apiKey && projectId) {
+        return {
+          apiKey,
+          projectId,
+          authDomain: authDomain || undefined,
+          storageBucket: storageBucket || undefined,
+          messagingSenderId: messagingSenderId || undefined,
+          appId: appId || undefined,
+          measurementId: measurementId || undefined,
+        };
+      }
+    } catch (e) {
+      console.error('Error parsing config snippet:', e);
+    }
+    return null;
+  }
+
   public tryInitFirebaseFromStorage(): boolean {
     try {
-      // 1. First priority: Check auto-provisioned Firebase applet config
+      // 1. First priority: Check custom stored config in localStorage
+      const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
+      if (storedConfig) {
+        try {
+          const config: FirebaseCustomConfig = JSON.parse(storedConfig);
+          if (config.apiKey && config.projectId && !config.apiKey.includes('DummyKey')) {
+            const ok = this.initFirebase(config);
+            if (ok) return true;
+          }
+        } catch (e) {
+          // ignore parse error
+        }
+      }
+
+      // 2. Second priority: Default user configured project
+      if (DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey) {
+        const ok = this.initFirebase(DEFAULT_FIREBASE_CONFIG);
+        if (ok) return true;
+      }
+
+      // 3. Third priority: Check auto-provisioned Firebase applet config
       if (firebaseAppletConfig && firebaseAppletConfig.apiKey && firebaseAppletConfig.projectId) {
         const autoConfig: FirebaseCustomConfig = {
           apiKey: firebaseAppletConfig.apiKey,
@@ -153,15 +224,6 @@ class StorageService {
         const ok = this.initFirebase(autoConfig);
         if (ok) {
           return true;
-        }
-      }
-
-      // 2. Second priority: Check custom stored config in localStorage
-      const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
-      if (storedConfig) {
-        const config: FirebaseCustomConfig = JSON.parse(storedConfig);
-        if (config.apiKey && config.projectId) {
-          return this.initFirebase(config);
         }
       }
     } catch (err) {
@@ -177,7 +239,13 @@ class StorageService {
       } else {
         this.app = initializeApp(config);
       }
-      this.db = getFirestore(this.app);
+      
+      const dbId = (firebaseAppletConfig as any)?.firestoreDatabaseId;
+      if (dbId && dbId !== '(default)') {
+        this.db = getFirestore(this.app, dbId);
+      } else {
+        this.db = getFirestore(this.app);
+      }
       try {
         const auth = getAuth(this.app);
         if (!auth.currentUser) {
@@ -207,6 +275,69 @@ class StorageService {
       }
     } catch (e) {
       // ignore
+    }
+  }
+
+  public async testFirebasePermissions(): Promise<{
+    success: boolean;
+    canRead: boolean;
+    canWrite: boolean;
+    message: string;
+    errorDetail?: string;
+  }> {
+    if (!this.db || !this.firebaseConnected) {
+      const ok = this.tryInitFirebaseFromStorage();
+      if (!ok || !this.db) {
+        return {
+          success: false,
+          canRead: false,
+          canWrite: false,
+          message: 'ยังไม่ได้เชื่อมต่อ Firebase (กรุณาตรวจสอบการตั้งค่า Config)',
+        };
+      }
+    }
+
+    let canWrite = false;
+    let canRead = false;
+    let errorDetail = '';
+
+    try {
+      // Test Write
+      const testRef = doc(this.db, '_connection_test', 'ping');
+      await setDoc(testRef, {
+        timestamp: new Date().toISOString(),
+        client: 'thai-grading-system',
+        test: true,
+      }, { merge: true });
+      canWrite = true;
+
+      // Test Read
+      const snap = await getDocs(collection(this.db, '_connection_test'));
+      if (!snap.empty) {
+        canRead = true;
+      }
+
+      return {
+        success: true,
+        canRead: true,
+        canWrite: true,
+        message: 'เชื่อมต่อและทดสอบสิทธิ์ Firestore สำเร็จสมบูรณ์! สามารถอ่านและบันทึกข้อมูลได้ตามปกติ',
+      };
+    } catch (err: any) {
+      errorDetail = err?.message || String(err);
+      const isPermError = errorDetail.includes('permission') || errorDetail.includes('Missing or insufficient') || err?.code === 'permission-denied';
+      
+      const msg = isPermError
+        ? 'สิทธิ์ Firestore ยังถูกล็อกอยู่ใน Firebase Console (Missing or insufficient permissions) กรุณาเข้าไปที่แท็บ Rules แล้วใส่ allow read, write: if true; แล้วกด Publish'
+        : `เกิดข้อผิดพลาดในการทดสอบ: ${errorDetail}`;
+
+      return {
+        success: false,
+        canRead,
+        canWrite,
+        message: msg,
+        errorDetail,
+      };
     }
   }
 
@@ -358,11 +489,16 @@ class StorageService {
         },
       };
     } catch (err: any) {
-      console.error('Error pulling data from Firebase Firestore:', err);
+      const isPermError = err?.message?.includes('permission') || err?.message?.includes('Missing or insufficient') || err?.code === 'permission-denied';
+      const friendlyMsg = isPermError
+        ? 'สิทธิ์ Firestore ใน Firebase Console ยังถูกล็อก (Missing or insufficient permissions) กรุณาเข้าไปเปิด Rules เป็น allow read, write: if true; แล้วกด Publish'
+        : (err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Cloud Firestore');
+
+      console.warn('Firestore pull status:', friendlyMsg);
       return {
         success: false,
         counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0 },
-        error: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Cloud Firestore',
+        error: friendlyMsg,
       };
     }
   }
@@ -442,11 +578,16 @@ class StorageService {
         },
       };
     } catch (err: any) {
-      console.error('Failed to sync all local data to Firebase:', err);
+      const isPermError = err?.message?.includes('permission') || err?.message?.includes('Missing or insufficient') || err?.code === 'permission-denied';
+      const friendlyMsg = isPermError
+        ? 'ไม่สามารถนำข้อมูลขึ้น Cloud ได้เนื่องจากติดสิทธิ์ (Missing or insufficient permissions) กรุณาเข้าไปเปิด Rules ใน Firebase Console ให้ allow read, write: if true; แล้วกด Publish'
+        : (err?.message || 'เกิดข้อผิดพลาดในการนำข้อมูลขึ้น Firebase');
+
+      console.warn('Firestore sync status:', friendlyMsg);
       return {
         success: false,
         counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0, settings: 0 },
-        error: err.message || 'เกิดข้อผิดพลาดในการนำข้อมูลขึ้น Firebase',
+        error: friendlyMsg,
       };
     }
   }
@@ -959,39 +1100,165 @@ class StorageService {
   }
 
   // --- EXPORT & IMPORT FULL BACKUP ---
+  /**
+   * ส่งออกไฟล์สำรองข้อมูลฉบับสมบูรณ์ (รายชื่อนักเรียน, ครูประจำวิชา, ชื่อผู้ใช้, รายวิชา, ใบงาน, คะแนน, เวลาเรียน, ข้อมูลสถานศึกษา)
+   */
   public exportBackupJSON(): string {
+    const students = this.getStudents();
+    const subjects = this.getSubjects();
+    const users = this.getUsers();
+    const assignments = this.getAssignments();
+    const scores = this.getScores();
+    const attendance = this.getAttendanceRecords();
+    const schoolSettings = this.getSchoolSettings();
+
     const backup = {
-      version: '1.0',
+      system: 'School Grading & Evaluation Management System',
+      version: '2.0',
       exportedAt: new Date().toISOString(),
-      students: this.getStudents(),
-      subjects: this.getSubjects(),
-      assignments: this.getAssignments(),
-      scores: this.getScores(),
-      attendance: this.getAttendanceRecords(),
-      // We exclude confidential user credentials if needed
+      summary: {
+        totalStudents: students.length,
+        totalSubjects: subjects.length,
+        totalUsers: users.length,
+        totalAssignments: assignments.length,
+        totalScores: scores.length,
+        totalAttendanceRecords: attendance.length,
+      },
+      students,
+      subjects,
+      users,
+      assignments,
+      scores,
+      attendance,
+      schoolSettings,
     };
     return JSON.stringify(backup, null, 2);
   }
 
-  public importBackupJSON(jsonString: string): { success: boolean; message: string } {
+  /**
+   * นำเข้าและกู้คืนข้อมูลทั้งหมดจากไฟล์สำรอง JSON (รายชื่อนักเรียน, ครูประจำวิชา, ชื่อผู้ใช้, รายวิชา, ใบงาน, คะแนน, เวลาเรียน)
+   */
+  public importBackupJSON(jsonString: string): { 
+    success: boolean; 
+    message: string;
+    counts?: {
+      students: number;
+      subjects: number;
+      users: number;
+      assignments: number;
+      scores: number;
+      attendance: number;
+      schoolSettings: boolean;
+    };
+  } {
     try {
       const data = JSON.parse(jsonString);
+      let studentsCount = 0;
+      let subjectsCount = 0;
+      let usersCount = 0;
+      let assignmentsCount = 0;
+      let scoresCount = 0;
+      let attendanceCount = 0;
+      let schoolSettingsRestored = false;
+
+      // 1. Restore Students (รายชื่อนักเรียน)
       if (data.students && Array.isArray(data.students)) {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(data.students));
+        const sanitizedStudents = data.students.map((s: any) => ({
+          ...s,
+          id: sanitizeDocId(s.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(sanitizedStudents));
+        studentsCount = sanitizedStudents.length;
       }
+
+      // 2. Restore Subjects (รายวิชาทั้งหมด)
       if (data.subjects && Array.isArray(data.subjects)) {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SUBJECTS, JSON.stringify(data.subjects));
+        const sanitizedSubjects = data.subjects.map((sub: any) => ({
+          ...sub,
+          id: sanitizeDocId(sub.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SUBJECTS, JSON.stringify(sanitizedSubjects));
+        subjectsCount = sanitizedSubjects.length;
       }
+
+      // 3. Restore Users & Subject Teachers (ครูประจำวิชา, ชื่อผู้ใช้, บัญชีผู้ใช้งาน)
+      if (data.users && Array.isArray(data.users) && data.users.length > 0) {
+        const sanitizedUsers = data.users.map((u: any) => ({
+          ...u,
+          id: sanitizeDocId(u.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(sanitizedUsers));
+        usersCount = sanitizedUsers.length;
+      }
+
+      // 4. Restore Assignments (ใบงานและช่องคะแนน)
       if (data.assignments && Array.isArray(data.assignments)) {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(data.assignments));
+        const sanitizedAssignments = data.assignments.map((a: any) => ({
+          ...a,
+          id: sanitizeDocId(a.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(sanitizedAssignments));
+        assignmentsCount = sanitizedAssignments.length;
       }
+
+      // 5. Restore Scores (คะแนนเก็บและเกรด)
       if (data.scores && Array.isArray(data.scores)) {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(data.scores));
+        const sanitizedScores = data.scores.map((sc: any) => ({
+          ...sc,
+          id: sanitizeDocId(sc.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(sanitizedScores));
+        scoresCount = sanitizedScores.length;
       }
+
+      // 6. Restore Attendance (บันทึกเวลาเรียน)
       if (data.attendance && Array.isArray(data.attendance)) {
-        localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(data.attendance));
+        const sanitizedAttendance = data.attendance.map((att: any) => ({
+          ...att,
+          id: sanitizeDocId(att.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(sanitizedAttendance));
+        attendanceCount = sanitizedAttendance.length;
       }
-      return { success: true, message: 'นำเข้าข้อมูลสำรองเรียบร้อยสมบูรณ์' };
+
+      // 7. Restore School Settings (ข้อมูลสถานศึกษา)
+      if (data.schoolSettings && typeof data.schoolSettings === 'object') {
+        localStorage.setItem(LOCAL_STORAGE_KEYS.SCHOOL_SETTINGS, JSON.stringify(data.schoolSettings));
+        schoolSettingsRestored = true;
+      }
+
+      // Sync to Firebase if connected
+      if (this.db && this.firebaseConnected) {
+        this.syncAllLocalDataToFirebase().catch((err) => {
+          console.warn('Auto-sync to Firebase after restore:', err);
+        });
+      }
+
+      const summaryParts: string[] = [];
+      if (studentsCount > 0) summaryParts.push(`นักเรียน ${studentsCount} คน`);
+      if (subjectsCount > 0) summaryParts.push(`รายวิชา ${subjectsCount} วิชา`);
+      if (usersCount > 0) summaryParts.push(`ครู/ผู้ใช้ ${usersCount} คน`);
+      if (assignmentsCount > 0) summaryParts.push(`ใบงาน ${assignmentsCount} รายการ`);
+      if (scoresCount > 0) summaryParts.push(`คะแนน ${scoresCount} ชุด`);
+      if (attendanceCount > 0) summaryParts.push(`เวลาเรียน ${attendanceCount} รายการ`);
+
+      const message = summaryParts.length > 0 
+        ? `กู้คืนข้อมูลสำเร็จ: ${summaryParts.join(', ')}`
+        : 'นำเข้าข้อมูลสำรองเรียบร้อยสมบูรณ์';
+
+      return { 
+        success: true, 
+        message,
+        counts: {
+          students: studentsCount,
+          subjects: subjectsCount,
+          users: usersCount,
+          assignments: assignmentsCount,
+          scores: scoresCount,
+          attendance: attendanceCount,
+          schoolSettings: schoolSettingsRestored,
+        }
+      };
     } catch (err: any) {
       return { success: false, message: 'รูปแบบไฟล์ไม่ถูกต้อง: ' + err.message };
     }

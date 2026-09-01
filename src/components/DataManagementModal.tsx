@@ -13,7 +13,7 @@ import {
   FileJson, 
   CheckCircle2 
 } from 'lucide-react';
-import { storage } from '../services/storage';
+import { storage, DEFAULT_FIREBASE_CONFIG } from '../services/storage';
 import { FirebaseCustomConfig } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
@@ -56,13 +56,60 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   if (!isOpen) return null;
 
   // Firebase Config Form
-  const [apiKey, setApiKey] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [authDomain, setAuthDomain] = useState('');
-  const [storageBucket, setStorageBucket] = useState('');
-  const [messagingSenderId, setMessagingSenderId] = useState('');
-  const [appId, setAppId] = useState('');
+  const [apiKey, setApiKey] = useState(DEFAULT_FIREBASE_CONFIG.apiKey || '');
+  const [projectId, setProjectId] = useState(DEFAULT_FIREBASE_CONFIG.projectId || '');
+  const [authDomain, setAuthDomain] = useState(DEFAULT_FIREBASE_CONFIG.authDomain || '');
+  const [storageBucket, setStorageBucket] = useState(DEFAULT_FIREBASE_CONFIG.storageBucket || '');
+  const [messagingSenderId, setMessagingSenderId] = useState(DEFAULT_FIREBASE_CONFIG.messagingSenderId || '');
+  const [appId, setAppId] = useState(DEFAULT_FIREBASE_CONFIG.appId || '');
+  const [configSnippet, setConfigSnippet] = useState(`const firebaseConfig = {
+  apiKey: "${DEFAULT_FIREBASE_CONFIG.apiKey}",
+  authDomain: "${DEFAULT_FIREBASE_CONFIG.authDomain}",
+  projectId: "${DEFAULT_FIREBASE_CONFIG.projectId}",
+  storageBucket: "${DEFAULT_FIREBASE_CONFIG.storageBucket}",
+  messagingSenderId: "${DEFAULT_FIREBASE_CONFIG.messagingSenderId}",
+  appId: "${DEFAULT_FIREBASE_CONFIG.appId}"
+};`);
   const [firebaseMsg, setFirebaseMsg] = useState<{ text: string; success: boolean } | null>(null);
+
+  const handleApplySnippet = () => {
+    if (!configSnippet.trim()) {
+      setFirebaseMsg({ text: 'กรุณาวางโค้ด Firebase Configuration ในช่องข้อความ', success: false });
+      return;
+    }
+    const parsed = storage.parseFirebaseConfigSnippet(configSnippet);
+    if (!parsed) {
+      setFirebaseMsg({ text: 'รูปแบบโค้ดไม่ถูกต้อง กรุณาวาง const firebaseConfig = { ... } หรือ JSON', success: false });
+      return;
+    }
+
+    setApiKey(parsed.apiKey);
+    setProjectId(parsed.projectId);
+    setAuthDomain(parsed.authDomain || '');
+    setStorageBucket(parsed.storageBucket || '');
+    setAppId(parsed.appId || '');
+    setMessagingSenderId(parsed.messagingSenderId || '');
+
+    const ok = storage.initFirebase(parsed);
+    if (ok) {
+      setFirebaseMsg({ text: `เชื่อมต่อ Firebase สำเร็จ! โปรเจกต์: ${parsed.projectId}`, success: true });
+      onRefreshFirebaseStatus();
+    } else {
+      setFirebaseMsg({ text: 'เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบ apiKey หรือ projectId', success: false });
+    }
+  };
+
+  const handleApplyDefaultConfig = () => {
+    const ok = storage.initFirebase(DEFAULT_FIREBASE_CONFIG);
+    if (ok) {
+      setApiKey(DEFAULT_FIREBASE_CONFIG.apiKey);
+      setProjectId(DEFAULT_FIREBASE_CONFIG.projectId);
+      setAuthDomain(DEFAULT_FIREBASE_CONFIG.authDomain || '');
+      setAppId(DEFAULT_FIREBASE_CONFIG.appId || '');
+      setFirebaseMsg({ text: 'เชื่อมต่อโปรเจกต์ my-project-1505207518592 สำเร็จ!', success: true });
+      onRefreshFirebaseStatus();
+    }
+  };
 
   // Download Full JSON Backup
   const handleDownloadBackup = () => {
@@ -76,6 +123,12 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    setStatusMessage({
+      type: 'success',
+      text: 'ส่งออกไฟล์สำรองข้อมูล JSON สำเร็จเรียบร้อย',
+      subText: 'ไฟล์สำรองประกอบด้วย รายชื่อนักเรียน, ครูประจำวิชา, ชื่อผู้ใช้, รายวิชา, ใบงาน, คะแนน และเวลาเรียนครบถ้วน',
+    });
   };
 
   // Import JSON Backup
@@ -89,13 +142,28 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
         const text = event.target?.result as string;
         const res = storage.importBackupJSON(text);
         if (res.success) {
-          setImportStatus('นำเข้าและกู้คืนข้อมูลสำเร็จเรียบร้อย!');
+          setImportStatus(res.message);
           onDataReset();
+          setStatusMessage({
+            type: 'success',
+            text: 'นำเข้าและกู้คืนข้อมูลสำเร็จสมบูรณ์!',
+            subText: res.message,
+          });
         } else {
           setImportStatus(`เกิดข้อผิดพลาด: ${res.message}`);
+          setStatusMessage({
+            type: 'error',
+            text: 'ไม่สามารถนำเข้าไฟล์สำรองข้อมูลได้',
+            subText: res.message,
+          });
         }
       } catch (err: any) {
         setImportStatus(`ไม่สามารถอ่านไฟล์ได้: ${err.message}`);
+        setStatusMessage({
+          type: 'error',
+          text: 'เกิดข้อผิดพลาดในการอ่านไฟล์',
+          subText: err.message,
+        });
       }
     };
     reader.readAsText(file);
@@ -169,6 +237,38 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  const [isTestingFirebase, setIsTestingFirebase] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestFirebasePermissions = async () => {
+    setIsTestingFirebase(true);
+    setTestResult(null);
+    try {
+      const res = await storage.testFirebasePermissions();
+      setTestResult({
+        success: res.success,
+        message: res.message,
+      });
+      if (res.success) {
+        setFirebaseMsg({
+          text: 'ทดสอบสิทธิ์ Firestore สำเร็จ! สามารถอ่าน-เขียนข้อมูลได้',
+          success: true,
+        });
+      } else {
+        setFirebaseMsg({
+          text: 'สิทธิ์ Firestore ยังถูกล็อก กรุณาแก้ไข Rules ใน Firebase Console',
+          success: false,
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: 'เกิดข้อผิดพลาดในการทดสอบ: ' + (err?.message || err),
+      });
+    } finally {
+      setIsTestingFirebase(false);
+    }
+  };
 
   const handleSyncAllToCloud = async () => {
     setIsSyncing(true);
@@ -309,38 +409,64 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h3 className="text-xs font-bold text-slate-800 mb-1 flex items-center gap-1.5">
                   <Download className="w-4 h-4 text-emerald-600" />
-                  ส่งออกไฟล์สำรองข้อมูลฉบับสมบูรณ์ (Full JSON Backup)
+                  ส่งออกไฟล์สำรองข้อมูลฉบับสมบูรณ์ (Full System Backup JSON)
                 </h3>
                 <p className="text-xs text-slate-500 mb-3">
-                  ดาวน์โหลดข้อมูลนักเรียนทุกห้อง, รายวิชา, ใบงาน และคะแนนทั้งหมดเก็บไว้ในคอมพิวเตอร์ของคุณ
+                  ดาวน์โหลดข้อมูลทั้งหมดในระบบเก็บไว้ในไฟล์เดียว ครอบคลุม:
                 </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span className="font-medium text-slate-700">รายชื่อนักเรียนทั้งหมด</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    <span className="font-medium text-slate-700">ครูประจำวิชา & ชื่อผู้ใช้</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    <span className="font-medium text-slate-700">รายวิชาทั้งหมด</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span className="font-medium text-slate-700">ใบงาน & สัดส่วนคะแนน</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span className="font-medium text-slate-700">คะแนนเก็บ & ผลการตัดเกรด</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                    <span className="font-medium text-slate-700">บันทึกการเช็คชื่อเวลาเรียน</span>
+                  </div>
+                </div>
                 <button
                   onClick={handleDownloadBackup}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-900 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>ดาวน์โหลดไฟล์สำรอง .JSON</span>
+                  <span>ดาวน์โหลดไฟล์สำรองข้อมูล (.json)</span>
                 </button>
               </div>
 
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h3 className="text-xs font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                  <Upload className="w-4 h-4 text-emerald-600" />
+                  <Upload className="w-4 h-4 text-blue-600" />
                   นำเข้าไฟล์สำรองข้อมูล (Restore from JSON)
                 </h3>
                 <p className="text-xs text-slate-500 mb-3">
-                  เลือกไฟล์ .json ที่เคยสำรองไว้เพื่อกู้คืนข้อมูลนักเรียนและคะแนน
+                  เลือกไฟล์ .json ที่เคยสำรองไว้เพื่อกู้คืนข้อมูลนักเรียน, ครูประจำวิชา, ชื่อผู้ใช้, รายวิชา, ใบงาน, คะแนน และเวลาเรียน
                 </p>
                 <input
                   type="file"
                   accept=".json"
                   onChange={handleImportJsonFile}
-                  className="text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"
+                  className="text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
                 />
                 {importStatus && (
-                  <p className="mt-2 text-xs font-semibold text-emerald-700">
+                  <div className="mt-3 p-2.5 bg-blue-50 border border-blue-200 text-blue-800 rounded-lg text-xs font-medium">
                     {importStatus}
-                  </p>
+                  </div>
                 )}
               </div>
 
@@ -426,6 +552,42 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
                 </span>
               </div>
 
+              {/* Paste Snippet Section */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2">
+                <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>วางโค้ด Firebase Configuration เพื่อเชื่อมต่อ (Copy & Paste)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  สามารถคัดลอก <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-mono">const firebaseConfig = &#123; ... &#125;;</code> วางแล้วกดเชื่อมต่อได้ทันที
+                </p>
+                <textarea
+                  value={configSnippet}
+                  onChange={(e) => setConfigSnippet(e.target.value)}
+                  rows={3}
+                  placeholder={`const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  projectId: "...",\n  appId: "..."\n};`}
+                  className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 font-mono text-slate-800"
+                />
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleApplySnippet}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>เชื่อมต่อตามโค้ดที่วาง</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyDefaultConfig}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-amber-500" />
+                    <span>ใช้โปรเจกต์ของฉัน (my-project-1505207518592)</span>
+                  </button>
+                </div>
+              </div>
+
               <form onSubmit={handleSaveFirebaseConfig} className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5 text-emerald-600" />
@@ -494,14 +656,48 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
                   </p>
                 )}
 
-                <div className="flex justify-end pt-2">
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestFirebasePermissions}
+                    disabled={isTestingFirebase}
+                    className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg shadow-2xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {isTestingFirebase ? (
+                      <div className="w-3 h-3 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                    )}
+                    <span>ทดสอบสิทธิ์ (Test Connection)</span>
+                  </button>
+
                   <button
                     type="submit"
-                    className="px-4 py-2 text-xs font-medium text-white bg-slate-800 hover:bg-slate-900 rounded-lg shadow-xs transition-colors cursor-pointer"
+                    className="px-4 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-lg shadow-xs transition-colors cursor-pointer"
                   >
-                    เชื่อมต่อ Firebase Firestore
+                    บันทึก & เชื่อมต่อ Firebase
                   </button>
                 </div>
+
+                {testResult && (
+                  <div className={`p-3 rounded-xl border text-xs ${
+                    testResult.success 
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                      : 'bg-rose-50 border-rose-200 text-rose-900'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      {testResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      )}
+                      <div className="space-y-1">
+                        <p className="font-bold">{testResult.success ? 'ผลการทดสอบ: สำเร็จ' : 'ผลการทดสอบ: ติดสิทธิ์การเข้าถึง'}</p>
+                        <p className="leading-relaxed text-[11px]">{testResult.message}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </form>
 
               {/* Sync All Local Data to Firebase Button */}

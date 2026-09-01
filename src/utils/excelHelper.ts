@@ -201,3 +201,66 @@ export function exportAttendanceExcel(
   XLSX.writeFile(wb, `ใบเช็คชื่อ_${subject.code}_${classKey.replace('/', '_')}_เทอม${semester}_${monthName}.xlsx`);
 }
 
+export function exportEvaluationReportExcel(
+  subject: Subject,
+  classKey: string,
+  semester: 1 | 2,
+  students: Student[],
+  evaluationItems: import('../types').Assignment[],
+  scores: StudentSubjectScore[]
+) {
+  const scoreMap = new Map<string, StudentSubjectScore>();
+  scores.forEach((s) => scoreMap.set(s.studentId, s));
+
+  const sortedStudents = [...students].sort((a, b) => a.studentNumber - b.studentNumber);
+  const maxTotal = evaluationItems.reduce((sum, item) => sum + (Number(item.maxScore) || 0), 0);
+
+  const exportRows = sortedStudents.map((st) => {
+    const sc = scoreMap.get(st.id);
+    const semKey = semester === 1 ? 'semester1' : 'semester2';
+    const asgScores = sc?.[semKey]?.assignmentScores || {};
+
+    const row: Record<string, any> = {
+      'เลขที่': st.studentNumber,
+      'รหัสนักเรียน': st.studentCode,
+      'คำนำหน้า': st.prefix,
+      'ชื่อ': st.firstName,
+      'นามสกุล': st.lastName,
+      'ห้องเรียน': st.classKey,
+      'วิชา': `${subject.code} ${subject.name}`,
+    };
+
+    let studentRawTotal = 0;
+
+    // Dynamic Assessment Item Columns
+    evaluationItems.forEach((item, index) => {
+      const val = asgScores[item.id] !== undefined ? asgScores[item.id] : '';
+      if (typeof val === 'number') {
+        studentRawTotal += val;
+      }
+      const colName = `${index + 1}. ${item.name} (เต็ม ${item.maxScore})`;
+      row[colName] = val;
+    });
+
+    const percentage = maxTotal > 0 ? (studentRawTotal / maxTotal) * 100 : 0;
+    let qualityLevel = 'ปรับปรุง';
+    if (percentage >= 80) qualityLevel = 'ดีเยี่ยม';
+    else if (percentage >= 70) qualityLevel = 'ดี';
+    else if (percentage >= 50) qualityLevel = 'ผ่านเกณฑ์';
+
+    row['คะแนนรวมที่ได้'] = studentRawTotal;
+    row['คะแนนเต็มรวม'] = maxTotal;
+    row['ร้อยละ (%)'] = Number(percentage.toFixed(2));
+    row['ระดับคุณภาพ'] = qualityLevel;
+    row['ผลการประเมิน'] = percentage >= 50 ? 'ผ่าน' : 'ไม่ผ่าน';
+
+    return row;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(exportRows);
+  const wb = XLSX.utils.book_new();
+  const safeTitle = `${subject.code}_${classKey.replace('/', '_')}_แบบประเมิน`.substring(0, 30);
+  XLSX.utils.book_append_sheet(wb, ws, safeTitle);
+  XLSX.writeFile(wb, `แบบบันทึกการประเมินนักเรียนรายบุคคล_${subject.code}_${classKey.replace('/', '_')}_เทอม${semester}.xlsx`);
+}
+
