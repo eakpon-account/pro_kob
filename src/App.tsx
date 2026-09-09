@@ -9,8 +9,11 @@ import {
   ScoreGrading 
 } from './components/ScoreGrading';
 import { 
-  StudentEvaluation 
-} from './components/StudentEvaluation';
+  ExamScoreManagement 
+} from './components/ExamScoreManagement';
+import { 
+  GradeCalculation 
+} from './components/GradeCalculation';
 import { 
   SubjectAttendance 
 } from './components/SubjectAttendance';
@@ -167,6 +170,12 @@ export default function App() {
     setCurrentTab('grading');
   };
 
+  const handleNavigateToCutGradeFromDashboard = (subjectId: string, classKey: string) => {
+    setTargetGradingSubjectId(subjectId);
+    setTargetGradingClassKey(classKey);
+    setCurrentTab('cut_grade');
+  };
+
   const handleOpenPrintModal = (
     subject: Subject,
     classKey: string,
@@ -194,6 +203,8 @@ export default function App() {
       case 'dashboard': return 'แดชบอร์ดภาพรวมและสถิติผลการเรียน';
       case 'attendance': return 'ระบบเช็คชื่อนักเรียนประจำรายวิชา';
       case 'grading': return 'บันทึกคะแนนและตัดเกรด (2 ภาคเรียน)';
+      case 'exams': return 'เก็บบันทึกคะแนนสอบ (Exams & Assessments)';
+      case 'cut_grade': return 'ระบบตัดเกรด 2 ภาคเรียน (เกณฑ์ 100 คะแนน)';
       case 'students': return 'ทะเบียนรายชื่อนักเรียน';
       case 'subjects': return 'รายวิชาและกำหนดสัดส่วนคะแนน';
       case 'settings':
@@ -337,6 +348,7 @@ export default function App() {
                 subjects={subjects}
                 scores={scores}
                 onSelectClassAndSubject={handleSelectClassAndSubjectFromDashboard}
+                onNavigateToCutGrade={handleNavigateToCutGradeFromDashboard}
               />
             )}
 
@@ -365,16 +377,29 @@ export default function App() {
               />
             )}
 
-            {currentTab === 'evaluation' && (
-              <StudentEvaluation
+            {currentTab === 'exams' && (
+              <ExamScoreManagement
+                currentUser={currentUser}
+                students={students}
+                subjects={subjects}
+                initialSubjectId={targetGradingSubjectId}
+                initialClassKey={targetGradingClassKey}
+                onNavigateToSubjects={() => setCurrentTab('subjects')}
+              />
+            )}
+
+            {currentTab === 'cut_grade' && (
+              <GradeCalculation
+                currentUser={currentUser}
                 students={students}
                 subjects={subjects}
                 assignments={assignments}
                 scores={scores}
                 onUpdateScores={setScores}
-                onUpdateAssignments={setAssignments}
-                preselectedSubjectId={targetGradingSubjectId}
-                preselectedClassKey={targetGradingClassKey}
+                onUpdateSubjects={setSubjects}
+                initialSubjectId={targetGradingSubjectId}
+                initialClassKey={targetGradingClassKey}
+                onNavigateToSubjects={() => setCurrentTab('subjects')}
               />
             )}
 

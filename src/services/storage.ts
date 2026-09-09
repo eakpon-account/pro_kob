@@ -1,7 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus } from '../types';
+import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus, Exam, ExamRecord } from '../types';
 import { INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, INITIAL_USERS, generateInitialScores, generateInitialStudents } from './mockData';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
@@ -49,6 +49,8 @@ const LOCAL_STORAGE_KEYS = {
   FIREBASE_CONFIG: 'school_grading_firebase_config_v2',
   SCHOOL_SETTINGS: 'school_grading_settings_v2',
   ATTENDANCE: 'school_grading_attendance_v2',
+  EXAMS: 'school_grading_exams_v2',
+  EXAM_RECORDS: 'school_grading_exam_records_v2',
   AUTH_SESSION: 'school_grading_auth_session_v2',
 };
 
@@ -371,6 +373,8 @@ class StorageService {
       scores: number;
       users: number;
       attendance: number;
+      exams?: number;
+      examRecords?: number;
     };
     isEmptyRemote?: boolean;
     error?: string;
@@ -396,6 +400,8 @@ class StorageService {
         attendanceSnap,
         usersSnap,
         settingsSnap,
+        examsSnap,
+        examRecordsSnap,
       ] = await Promise.all([
         getDocs(collection(this.db, 'students')),
         getDocs(collection(this.db, 'subjects')),
@@ -404,6 +410,8 @@ class StorageService {
         getDocs(collection(this.db, 'attendance')),
         getDocs(collection(this.db, 'users')),
         getDocs(collection(this.db, 'settings')),
+        getDocs(collection(this.db, 'exams')),
+        getDocs(collection(this.db, 'exam_records')),
       ]);
 
       const totalRemoteDocs =
@@ -412,7 +420,9 @@ class StorageService {
         assignmentsSnap.size +
         scoresSnap.size +
         attendanceSnap.size +
-        usersSnap.size;
+        usersSnap.size +
+        examsSnap.size +
+        examRecordsSnap.size;
 
       // หากบน Cloud Firestore ยังว่างเปล่า (เพิ่งสร้าง Database ใหม่) ให้อัปโหลดข้อมูลตั้งต้นขึ้น Cloud
       if (totalRemoteDocs === 0) {
@@ -437,6 +447,9 @@ class StorageService {
         const remoteStudents: Student[] = [];
         studentsSnap.forEach((d) => remoteStudents.push(d.data() as Student));
         localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(remoteStudents));
+      } else {
+        // หากใน Firebase ยังไม่มีข้อมูลนักเรียน ให้นำข้อมูลนักเรียนปัจจุบันส่งขึ้น Firebase ทันที
+        await this.createAndSeedStudentsInFirebase();
       }
 
       if (!subjectsSnap.empty) {
@@ -477,6 +490,18 @@ class StorageService {
         });
       }
 
+      if (!examsSnap.empty) {
+        const remoteExams: Exam[] = [];
+        examsSnap.forEach((d) => remoteExams.push(d.data() as Exam));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(remoteExams));
+      }
+
+      if (!examRecordsSnap.empty) {
+        const remoteExamRecords: ExamRecord[] = [];
+        examRecordsSnap.forEach((d) => remoteExamRecords.push(d.data() as ExamRecord));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(remoteExamRecords));
+      }
+
       return {
         success: true,
         counts: {
@@ -486,6 +511,8 @@ class StorageService {
           scores: scoresSnap.size,
           attendance: attendanceSnap.size,
           users: usersSnap.size,
+          exams: examsSnap.size,
+          examRecords: examRecordsSnap.size,
         },
       };
     } catch (err: any) {
@@ -597,6 +624,28 @@ class StorageService {
       }, (err) => console.warn('Settings live sync warning:', err));
       unsubscribers.push(unsubSettings);
 
+      // 8. Listen to Exams
+      const unsubExams = onSnapshot(collection(this.db!, 'exams'), (snap) => {
+        if (!snap.empty) {
+          const list: Exam[] = [];
+          snap.forEach((d) => list.push(d.data() as Exam));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(list));
+          onUpdate('exams');
+        }
+      }, (err) => console.warn('Exams live sync warning:', err));
+      unsubscribers.push(unsubExams);
+
+      // 9. Listen to Exam Records
+      const unsubExamRecords = onSnapshot(collection(this.db!, 'exam_records'), (snap) => {
+        if (!snap.empty) {
+          const list: ExamRecord[] = [];
+          snap.forEach((d) => list.push(d.data() as ExamRecord));
+          localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(list));
+          onUpdate('exam_records');
+        }
+      }, (err) => console.warn('Exam records live sync warning:', err));
+      unsubscribers.push(unsubExamRecords);
+
     } catch (e) {
       console.warn('Could not setup realtime listeners:', e);
     }
@@ -623,6 +672,8 @@ class StorageService {
       scores: number;
       users: number;
       attendance: number;
+      exams?: number;
+      examRecords?: number;
       settings: number;
     };
     error?: string;
@@ -647,6 +698,8 @@ class StorageService {
       const scores = this.getScores();
       const users = this.getUsers();
       const attendance = this.getAttendanceRecords();
+      const exams = this.getExams();
+      const examRecords = this.getExamRecords();
       const settings = this.getSchoolSettings();
 
       // Chunk write batches (Firestore has 500 operations per batch limit)
@@ -658,6 +711,8 @@ class StorageService {
       scores.forEach((sc) => allOperations.push({ collection: 'scores', id: sanitizeDocId(sc.id), data: sc }));
       users.forEach((u) => allOperations.push({ collection: 'users', id: sanitizeDocId(u.id), data: u }));
       attendance.forEach((att) => allOperations.push({ collection: 'attendance', id: sanitizeDocId(att.id), data: att }));
+      exams.forEach((ex) => allOperations.push({ collection: 'exams', id: sanitizeDocId(ex.id), data: ex }));
+      examRecords.forEach((er) => allOperations.push({ collection: 'exam_records', id: sanitizeDocId(er.id), data: er }));
       allOperations.push({ collection: 'settings', id: 'school_settings', data: settings });
 
       // Execute batches in chunks of 400
@@ -681,6 +736,8 @@ class StorageService {
           scores: scores.length,
           users: users.length,
           attendance: attendance.length,
+          exams: exams.length,
+          examRecords: examRecords.length,
           settings: 1,
         },
       };
@@ -1276,6 +1333,112 @@ class StorageService {
     return result;
   }
 
+  // --- EXAMS (แบบทดสอบและการสอบ) ---
+  public getExams(): Exam[] {
+    const data = localStorage.getItem(LOCAL_STORAGE_KEYS.EXAMS);
+    return data ? JSON.parse(data) : [];
+  }
+
+  public saveExam(exam: Exam): void {
+    const exams = this.getExams();
+    const safeExam: Exam = {
+      ...exam,
+      id: sanitizeDocId(exam.id),
+      updatedAt: new Date().toISOString(),
+    };
+    const idx = exams.findIndex((e) => e.id === safeExam.id);
+    if (idx >= 0) {
+      exams[idx] = safeExam;
+    } else {
+      exams.push(safeExam);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(exams));
+
+    if (this.db && this.firebaseConnected) {
+      setDoc(doc(this.db, 'exams', safeExam.id), cleanForFirestore(safeExam)).catch(console.error);
+    }
+  }
+
+  public deleteExam(examId: string): void {
+    const safeId = sanitizeDocId(examId);
+    const exams = this.getExams().filter((e) => e.id !== safeId && e.id !== examId);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(exams));
+
+    // ลบคะแนนสอบของแบบทดสอบนี้ด้วย
+    const records = this.getExamRecords().filter((r) => r.examId !== safeId && r.examId !== examId);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(records));
+
+    if (this.db && this.firebaseConnected) {
+      deleteDoc(doc(this.db, 'exams', safeId)).catch(console.error);
+    }
+  }
+
+  // --- EXAM RECORDS (คะแนนสอบของนักเรียนตามห้อง) ---
+  public getExamRecords(): ExamRecord[] {
+    const data = localStorage.getItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS);
+    return data ? JSON.parse(data) : [];
+  }
+
+  public getExamRecord(examId: string, classKey: string): ExamRecord | undefined {
+    const safeExamId = sanitizeDocId(examId);
+    const safeClassKey = classKey.replace(/[\/\\]/g, '-');
+    const targetId = sanitizeDocId(`exam_${safeExamId}_${safeClassKey}`);
+    const records = this.getExamRecords();
+    return records.find((r) => r.id === targetId || (r.examId === examId && r.classKey === classKey));
+  }
+
+  public saveExamRecord(record: ExamRecord): void {
+    const records = this.getExamRecords();
+    const safeRecord: ExamRecord = {
+      ...record,
+      id: sanitizeDocId(record.id),
+      updatedAt: new Date().toISOString(),
+    };
+    const idx = records.findIndex((r) => r.id === safeRecord.id);
+    if (idx >= 0) {
+      records[idx] = safeRecord;
+    } else {
+      records.push(safeRecord);
+    }
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(records));
+
+    if (this.db && this.firebaseConnected) {
+      setDoc(doc(this.db, 'exam_records', safeRecord.id), cleanForFirestore(safeRecord)).catch(console.error);
+    }
+  }
+
+  public bulkSaveExamRecords(newRecords: ExamRecord[]): void {
+    const existing = this.getExamRecords();
+    const map = new Map<string, ExamRecord>();
+    existing.forEach((r) => map.set(r.id, r));
+    newRecords.forEach((r) => {
+      const safeId = sanitizeDocId(r.id);
+      map.set(safeId, { ...r, id: safeId, updatedAt: new Date().toISOString() });
+    });
+    const combined = Array.from(map.values());
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(combined));
+
+    if (this.db && this.firebaseConnected) {
+      const batch = writeBatch(this.db);
+      newRecords.forEach((r) => {
+        const safeId = sanitizeDocId(r.id);
+        const ref = doc(this.db!, 'exam_records', safeId);
+        batch.set(ref, cleanForFirestore({ ...r, id: safeId, updatedAt: new Date().toISOString() }));
+      });
+      batch.commit().catch(console.error);
+    }
+  }
+
+  public deleteExamRecord(recordId: string): void {
+    const safeId = sanitizeDocId(recordId);
+    const records = this.getExamRecords().filter((r) => r.id !== safeId && r.id !== recordId);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(records));
+
+    if (this.db && this.firebaseConnected) {
+      deleteDoc(doc(this.db, 'exam_records', safeId)).catch(console.error);
+    }
+  }
+
   // --- DATA MANAGEMENT: CLEAR / RESET ONLY STUDENT & SCORE DATA ---
   /**
    * ล้างข้อมูลนักเรียน คะแนน ใบงาน โดย "ไม่ลบข้อมูลผู้ใช้งานและครูในระบบ" ตามข้อกำหนด
@@ -1285,10 +1448,14 @@ class StorageService {
     localStorage.removeItem(LOCAL_STORAGE_KEYS.SCORES);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.ATTENDANCE);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.EXAMS);
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS);
     localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify([]));
     localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify([]));
     localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify([]));
     localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify([]));
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify([]));
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify([]));
 
     if (this.db && this.firebaseConnected) {
       // Async clear collections if needed
@@ -1307,6 +1474,8 @@ class StorageService {
     localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(INITIAL_ASSIGNMENTS));
     localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(initScores));
     localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify([]));
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify([]));
+    localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify([]));
   }
 
   // --- EXPORT & IMPORT FULL BACKUP ---
@@ -1320,6 +1489,8 @@ class StorageService {
     const assignments = this.getAssignments();
     const scores = this.getScores();
     const attendance = this.getAttendanceRecords();
+    const exams = this.getExams();
+    const examRecords = this.getExamRecords();
     const schoolSettings = this.getSchoolSettings();
 
     const backup = {
@@ -1333,6 +1504,8 @@ class StorageService {
         totalAssignments: assignments.length,
         totalScores: scores.length,
         totalAttendanceRecords: attendance.length,
+        totalExams: exams.length,
+        totalExamRecords: examRecords.length,
       },
       students,
       subjects,
@@ -1340,6 +1513,8 @@ class StorageService {
       assignments,
       scores,
       attendance,
+      exams,
+      examRecords,
       schoolSettings,
     };
     return JSON.stringify(backup, null, 2);
@@ -1358,6 +1533,8 @@ class StorageService {
       assignments: number;
       scores: number;
       attendance: number;
+      exams?: number;
+      examRecords?: number;
       schoolSettings: boolean;
     };
   } {
@@ -1369,6 +1546,8 @@ class StorageService {
       let assignmentsCount = 0;
       let scoresCount = 0;
       let attendanceCount = 0;
+      let examsCount = 0;
+      let examRecordsCount = 0;
       let schoolSettingsRestored = false;
 
       // 1. Restore Students (รายชื่อนักเรียน)
@@ -1431,7 +1610,27 @@ class StorageService {
         attendanceCount = sanitizedAttendance.length;
       }
 
-      // 7. Restore School Settings (ข้อมูลสถานศึกษา)
+      // 7. Restore Exams (แบบทดสอบและการสอบ)
+      if (data.exams && Array.isArray(data.exams)) {
+        const sanitizedExams = data.exams.map((ex: any) => ({
+          ...ex,
+          id: sanitizeDocId(ex.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(sanitizedExams));
+        examsCount = sanitizedExams.length;
+      }
+
+      // 8. Restore Exam Records (คะแนนสอบนักเรียน)
+      if (data.examRecords && Array.isArray(data.examRecords)) {
+        const sanitizedExamRecords = data.examRecords.map((er: any) => ({
+          ...er,
+          id: sanitizeDocId(er.id),
+        }));
+        localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(sanitizedExamRecords));
+        examRecordsCount = sanitizedExamRecords.length;
+      }
+
+      // 9. Restore School Settings (ข้อมูลสถานศึกษา)
       if (data.schoolSettings && typeof data.schoolSettings === 'object') {
         localStorage.setItem(LOCAL_STORAGE_KEYS.SCHOOL_SETTINGS, JSON.stringify(data.schoolSettings));
         schoolSettingsRestored = true;

@@ -36,7 +36,7 @@ import { storage } from '../services/storage';
 import { ROLE_CONFIGS } from './UserManagement';
 import { SettingsTabId } from './SystemSettings';
 
-export type MainTabType = 'dashboard' | 'attendance' | 'grading' | 'evaluation' | 'students' | 'subjects' | 'settings' | 'users';
+export type MainTabType = 'dashboard' | 'attendance' | 'grading' | 'exams' | 'cut_grade' | 'students' | 'subjects' | 'settings' | 'users';
 
 interface SidebarProps {
   currentTab: MainTabType;
@@ -189,25 +189,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }`}
           >
             <Award className={`w-4 h-4 ${currentTab === 'grading' ? 'text-emerald-600' : 'text-slate-400'}`} />
-            <span>บันทึกคะแนนและตัดเกรด</span>
+            <span>บันทึกคะแนนใบงาน</span>
           </button>
 
-          {/* Individual Student Evaluation (แบบบันทึกการประเมินนักเรียนรายบุคคล) */}
+          {/* Exam Scores (เก็บคะแนนสอบ) */}
           <button
-            id="nav-tab-evaluation"
-            onClick={() => handleNavClick('evaluation')}
+            id="nav-tab-exams"
+            onClick={() => handleNavClick('exams')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
-              currentTab === 'evaluation'
+              currentTab === 'exams'
                 ? 'bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200 shadow-xs'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
             }`}
           >
             <div className="flex items-center gap-3">
-              <ClipboardCheck className={`w-4 h-4 ${currentTab === 'evaluation' ? 'text-indigo-600' : 'text-slate-400'}`} />
-              <span>ประเมินนักเรียนรายบุคคล</span>
+              <ClipboardCheck className={`w-4 h-4 ${currentTab === 'exams' ? 'text-indigo-600' : 'text-slate-400'}`} />
+              <span>เก็บคะแนนสอบ</span>
             </div>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-              ใหม่
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+              currentTab === 'exams'
+                ? 'bg-indigo-100 text-indigo-800'
+                : 'bg-slate-100 text-slate-500'
+            }`}>
+              แบบทดสอบ
+            </span>
+          </button>
+
+          {/* Cut Grade (ตัดเกรด 2 ภาคเรียน เกณฑ์ 100) */}
+          <button
+            id="nav-tab-cut-grade"
+            onClick={() => handleNavClick('cut_grade')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
+              currentTab === 'cut_grade'
+                ? 'bg-emerald-50 text-emerald-800 font-bold border border-emerald-300 shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <GraduationCap className={`w-4 h-4 ${currentTab === 'cut_grade' ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <span>ตัดเกรด</span>
+            </div>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+              currentTab === 'cut_grade'
+                ? 'bg-emerald-100 text-emerald-900'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            }`}>
+              เกณฑ์ 100
             </span>
           </button>
 

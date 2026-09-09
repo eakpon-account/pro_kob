@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { Printer, X, Download, School, CheckCircle2, FileSpreadsheet, LayoutList, Award, FileText } from 'lucide-react';
 import { Assignment, Student, StudentSubjectScore, Subject } from '../types';
-import { getCategoryInfo, getGradeLabel, getAssignmentAbbreviation, getAssignmentSummaryText } from '../utils/grading';
+import { 
+  getCategoryInfo, 
+  getGradeLabel, 
+  getAssignmentAbbreviation, 
+  getAssignmentSummaryText,
+  getFormattedStandardText,
+  getDisplayTopic,
+  formatStrandDisplay
+} from '../utils/grading';
 
 interface PrintReportModalProps {
   isOpen: boolean;
@@ -159,7 +167,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               <span>ครูผู้สอน: <strong>{subject.teacherName}</strong></span>
             </div>
             <p className="text-[11px] text-slate-600 mt-1">
-              {selectedView !== 'combined'
+              {selectedView === 1
+                ? `ตารางบันทึกคะแนนรายชิ้นงาน ${currentSemesterAssignments.length} รายการ (คะแนนเต็มรวม ${currentSemesterTotalMax} คะแนน)`
+                : selectedView === 2
                 ? `ตารางบันทึกคะแนนรายชิ้นงาน ${currentSemesterAssignments.length} รายการ (คะแนนเต็มรวม ${currentSemesterTotalMax} คะแนน) &bull; คำนวณตัดเกรด 8 ระดับ (0 - 4)`
                 : 'การประเมินผล: คะแนนเฉลี่ย 2 ภาคเรียน ((เทอม 1 + เทอม 2) ÷ 2) &bull; ตัดเกรด 8 ระดับ (0, 1, 1.5, 2, 2.5, 3, 3.5, 4)'}
             </p>
@@ -196,14 +206,16 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     </th>
 
                     <th className="py-2 px-2 border border-slate-800 w-20 bg-slate-50 font-bold">
-                      เทียบ 100<br/>
-                      <span className="text-[10px] font-normal">(เต็ม 100)</span>
+                      คะแนนเก็บทั้งหมด<br/>
+                      <span className="text-[10px] font-normal">(เต็ม {selectedView === 2 ? (subject.semester2TargetScore ?? 100) : (subject.semester1TargetScore ?? 100)})</span>
                     </th>
 
-                    <th className="py-2 px-2 border border-slate-800 w-16 bg-slate-100 font-bold">
-                      เกรด<br/>
-                      <span className="text-[10px] font-normal">(0 - 4)</span>
-                    </th>
+                    {selectedView !== 1 && (
+                      <th className="py-2 px-2 border border-slate-800 w-16 bg-slate-100 font-bold">
+                        เกรด<br/>
+                        <span className="text-[10px] font-normal">(0 - 4)</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -237,9 +249,11 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                         <td className="py-1 px-2 border border-slate-400 text-center font-bold bg-slate-50 font-mono">
                           {semTotal.toFixed(1)}
                         </td>
-                        <td className="py-1 px-2 border border-slate-400 text-center font-bold bg-slate-100 text-xs">
-                          {semGrade}
-                        </td>
+                        {selectedView !== 1 && (
+                          <td className="py-1 px-2 border border-slate-400 text-center font-bold bg-slate-100 text-xs">
+                            {semGrade}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -249,17 +263,56 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               {/* Assignment Details / Legend at the bottom of the table */}
               {currentSemesterAssignments.length > 0 && (
                 <div className="mt-3 p-2.5 border border-slate-600 rounded bg-slate-50 text-[11px] leading-relaxed">
-                  <div className="font-bold text-slate-900 mb-1 flex items-center gap-1">
+                  <div className="font-bold text-slate-900 mb-2 flex items-center gap-1">
                     <FileText className="w-3.5 h-3.5 text-slate-700" />
-                    <span>ข้อมูลช่องใบงานและแบบทดสอบ (ภาคเรียนที่ {selectedView}):</span>
+                    <span>ข้อมูลใบงานและช่องคะแนน (ภาคเรียนที่ {selectedView}):</span>
                   </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-slate-800">
                     {currentSemesterAssignments.map((asg) => {
-                      const summaryText = getAssignmentSummaryText(asg, currentSemesterAssignments);
+                      const abbr = getAssignmentAbbreviation(asg, currentSemesterAssignments);
+                      const catInfo = getCategoryInfo(asg.category);
+                      const strandVal = formatStrandDisplay(asg.strand) || '-';
+                      const stdVal = asg.standard?.trim() || getFormattedStandardText(asg) || '-';
+                      const indVal = asg.indicator?.trim() || asg.indicatorNo?.trim() || '-';
+                      const topicVal = getDisplayTopic(asg) || '-';
+
                       return (
-                        <span key={asg.id} className="inline-block">
-                          <strong>{summaryText.split('.')[0]}.</strong> {summaryText.substring(summaryText.indexOf('.') + 1)}
-                        </span>
+                        <div key={asg.id} className="p-2 border border-slate-300 rounded bg-white text-[10px] space-y-0.5">
+                          <div className="font-bold text-slate-900 border-b border-slate-200 pb-0.5 mb-1 flex items-center justify-between">
+                            <span>{abbr}. {asg.name}</span>
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-600 font-normal">
+                              {catInfo.label}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">สาระ : </span>
+                            <span className="font-semibold text-slate-800">{strandVal ? strandVal.replace(/^สาระที่\s*/g, '').replace(/^สาระ\s*/g, '') : '-'}</span>
+                          </div>
+                          <div className="flex justify-between gap-2">
+                            <div>
+                              <span className="text-slate-500">มาตราฐาน : </span>
+                              <span className="font-semibold text-slate-800">{stdVal}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500">ตัวชี้วัด : </span>
+                              <span className="font-semibold text-slate-800">{indVal}</span>
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">เรื่อง : </span>
+                            <span className="font-medium text-slate-800">{topicVal}</span>
+                          </div>
+                          <div className="flex justify-between gap-2 pt-0.5 border-t border-slate-100 mt-0.5">
+                            <div>
+                              <span className="text-slate-500">ประเภท : </span>
+                              <span className="font-semibold text-slate-700">{catInfo.label}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500">คะแนนเต็ม: </span>
+                              <span className="font-bold text-emerald-800">{asg.maxScore} คะแนน</span>
+                            </div>
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
@@ -276,8 +329,8 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     <th className="py-2 px-2 border border-slate-800 w-10">เลขที่</th>
                     <th className="py-2 px-2 border border-slate-800 w-20">รหัส</th>
                     <th className="py-2 px-3 border border-slate-800 text-left">ชื่อ - สกุล</th>
-                    <th className="py-2 px-2 border border-slate-800 w-24">คะแนนเทอม 1<br/><span className="text-[10px] font-normal">(100)</span></th>
-                    <th className="py-2 px-2 border border-slate-800 w-24">คะแนนเทอม 2<br/><span className="text-[10px] font-normal">(100)</span></th>
+                    <th className="py-2 px-2 border border-slate-800 w-24">คะแนนเทอม 1<br/><span className="text-[10px] font-normal">(เต็ม {subject.semester1TargetScore ?? 100})</span></th>
+                    <th className="py-2 px-2 border border-slate-800 w-24">คะแนนเทอม 2<br/><span className="text-[10px] font-normal">(เต็ม {subject.semester2TargetScore ?? 100})</span></th>
                     <th className="py-2 px-2 border border-slate-800 w-28 bg-slate-50">คะแนนเฉลี่ย 2 เทอม<br/><span className="text-[10px] font-normal">(S1+S2)/2</span></th>
                     <th className="py-2 px-2 border border-slate-800 w-20 bg-slate-100">เกรดตัดสิน<br/><span className="text-[10px] font-normal">(0 - 4)</span></th>
                     <th className="py-2 px-2 border border-slate-800 w-24">ผลการประเมิน</th>

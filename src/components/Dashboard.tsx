@@ -27,7 +27,8 @@ import {
   Sparkles,
   ArrowUpRight,
   Sliders,
-  ChevronRight
+  ChevronRight,
+  GraduationCap
 } from 'lucide-react';
 import { Student, StudentSubjectScore, Subject, ClassroomSummary } from '../types';
 import { calculateClassStats, getGradeLabel } from '../utils/grading';
@@ -37,6 +38,7 @@ interface DashboardProps {
   subjects: Subject[];
   scores: StudentSubjectScore[];
   onSelectClassAndSubject?: (subjectId: string, classKey: string) => void;
+  onNavigateToCutGrade?: (subjectId: string, classKey: string) => void;
 }
 
 const GRADE_COLORS: Record<string, string> = {
@@ -55,6 +57,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   subjects,
   scores,
   onSelectClassAndSubject,
+  onNavigateToCutGrade,
 }) => {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('all');
   const [selectedGradeLevel, setSelectedGradeLevel] = useState<string>('all');
@@ -579,18 +582,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </td>
 
                   <td className="px-6 py-4 text-right">
-                    {onSelectClassAndSubject && (
-                      <button
-                        onClick={() => {
-                          const targetSubId = selectedSubjectId !== 'all' ? selectedSubjectId : (subjects[0]?.id || '');
-                          onSelectClassAndSubject(targetSubId, summary.classKey);
-                        }}
-                        className="text-slate-600 hover:text-slate-900 text-xs font-bold bg-slate-50 hover:bg-slate-100 px-2.5 py-1 rounded border border-slate-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>ดูคะแนน / บันทึกผล</span>
-                        <ChevronRight className="w-3 h-3 text-slate-400" />
-                      </button>
-                    )}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {onNavigateToCutGrade && (
+                        <button
+                          onClick={() => {
+                            const targetSubId = selectedSubjectId !== 'all' ? selectedSubjectId : (subjects[0]?.id || '');
+                            onNavigateToCutGrade(targetSubId, summary.classKey);
+                          }}
+                          className="text-emerald-700 hover:text-emerald-900 text-xs font-bold bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded border border-emerald-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                          title="ไปที่เมนูตัดเกรด 100 คะแนนสำหรับห้องนี้"
+                        >
+                          <GraduationCap className="w-3 h-3 text-emerald-600" />
+                          <span>ตัดเกรด</span>
+                        </button>
+                      )}
+                      {onSelectClassAndSubject && (
+                        <button
+                          onClick={() => {
+                            const targetSubId = selectedSubjectId !== 'all' ? selectedSubjectId : (subjects[0]?.id || '');
+                            onSelectClassAndSubject(targetSubId, summary.classKey);
+                          }}
+                          className="text-slate-600 hover:text-slate-900 text-xs font-bold bg-slate-50 hover:bg-slate-100 px-2.5 py-1 rounded border border-slate-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>ใบงาน</span>
+                          <ChevronRight className="w-3 h-3 text-slate-400" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

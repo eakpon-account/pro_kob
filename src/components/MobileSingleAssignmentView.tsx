@@ -4,7 +4,13 @@ import {
   Student, 
   StudentSubjectScore 
 } from '../types';
-import { getCategoryInfo, getGradeLabel } from '../utils/grading';
+import { 
+  getCategoryInfo, 
+  getGradeLabel,
+  getFormattedStandardText,
+  getDisplayTopic,
+  formatStrandDisplay
+} from '../utils/grading';
 import { 
   Check, 
   Sparkles, 
@@ -12,7 +18,9 @@ import {
   ChevronUp, 
   UserCheck, 
   AlertCircle,
-  FileText
+  FileText,
+  Target,
+  Bookmark
 } from 'lucide-react';
 
 interface MobileSingleAssignmentViewProps {
@@ -36,6 +44,8 @@ export const MobileSingleAssignmentView: React.FC<MobileSingleAssignmentViewProp
 }) => {
   const catInfo = getCategoryInfo(assignment.category);
   const semKey = activeSemester === 1 ? 'semester1' : 'semester2';
+  const currentFormattedStd = getFormattedStandardText(assignment);
+  const currentDisplayTopic = getDisplayTopic(assignment);
 
   // Stats calculation
   const filledCount = students.filter((st) => {
@@ -81,28 +91,78 @@ export const MobileSingleAssignmentView: React.FC<MobileSingleAssignmentViewProp
             onChange={(e) => onSelectAssignment(e.target.value)}
             className="w-full bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-900 appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all cursor-pointer pr-10"
           >
-            {assignments.map((asg, idx) => (
-              <option key={asg.id} value={asg.id}>
-                {idx + 1}. {asg.name} (เต็ม {asg.maxScore} คะแนน) [{getCategoryInfo(asg.category).label}]
-              </option>
-            ))}
+            {assignments.map((asg, idx) => {
+              const std = getFormattedStandardText(asg);
+              const top = getDisplayTopic(asg);
+              const strandVal = formatStrandDisplay(asg.strand);
+              const strandPart = strandVal ? ` [สาระที่ : ${strandVal}]` : '';
+              const stdPart = asg.standard ? ` [มาตรฐาน : ${asg.standard}]` : (std ? ` [มาตรฐาน : ${std}]` : '');
+              const indPart = asg.indicator ? ` [ตัวชี้วัด : ${asg.indicator}]` : '';
+              return (
+                <option key={asg.id} value={asg.id}>
+                  {idx + 1}. {asg.name}{strandPart}{stdPart}{indPart} [ประเภท : {getCategoryInfo(asg.category).label}]{top ? ` [เรื่อง : ${top}]` : ''} (เต็ม {asg.maxScore} คะแนน)
+                </option>
+              );
+            })}
           </select>
           <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* Assignment Brief */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${catInfo.bgClass} ${catInfo.textClass} ${catInfo.borderClass}`}>
-              {catInfo.label}
-            </span>
-            <span className="text-slate-600 font-medium truncate max-w-[200px]">
-              {assignment.description || 'ไม่มีคำอธิบายเพิ่มเติม'}
+        {/* Assignment Brief: ข้อมูลใบงานและช่องคะแนน */}
+        <div className="pt-2 border-t border-slate-100 text-xs space-y-1.5 bg-slate-50/70 p-2.5 rounded-xl border border-slate-200">
+          {/* บรรทัดที่ 1: สาระที่ : */}
+          <div className="flex items-center gap-1.5 leading-snug">
+            <span className="font-semibold text-slate-500 text-[11px] shrink-0">สาระที่ :</span>
+            <span className={`text-[11px] font-medium ${assignment.strand ? 'font-bold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200' : 'text-slate-400'}`}>
+              {formatStrandDisplay(assignment.strand) || '-'}
             </span>
           </div>
-          <span className="font-extrabold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200">
-            คะแนนเต็ม {assignment.maxScore}
-          </span>
+
+          {/* บรรทัดที่ 2: มาตราฐาน :              ตัวชี้วัด : */}
+          <div className="grid grid-cols-2 gap-2 leading-snug">
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="font-semibold text-slate-500 text-[11px] shrink-0">มาตราฐาน :</span>
+              <span className={`text-[11px] truncate ${assignment.standard || currentFormattedStd ? 'font-bold text-sky-800 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200' : 'text-slate-400'}`} title={assignment.standard || currentFormattedStd || ''}>
+                {assignment.standard || currentFormattedStd || '-'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="font-semibold text-slate-500 text-[11px] shrink-0">ตัวชี้วัด :</span>
+              <span className={`text-[11px] truncate ${assignment.indicator ? 'font-bold text-teal-800 bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200' : 'text-slate-400'}`} title={assignment.indicator || ''}>
+                {assignment.indicator || '-'}
+              </span>
+            </div>
+          </div>
+
+          {/* บรรทัดที่ 3: เรื่อง : */}
+          <div className="flex items-center gap-1.5 leading-snug min-w-0">
+            <span className="font-semibold text-slate-500 text-[11px] shrink-0">เรื่อง :</span>
+            <span className={`text-[11px] truncate ${currentDisplayTopic ? 'font-medium text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200' : 'text-slate-400'}`} title={currentDisplayTopic || ''}>
+              {currentDisplayTopic || '-'}
+            </span>
+          </div>
+
+          {/* บรรทัดที่ 4: ประเภท :          คะแนนเต็ม:    คะแนน */}
+          <div className="grid grid-cols-2 gap-2 leading-snug items-center">
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="font-semibold text-slate-500 text-[11px] shrink-0">ประเภท :</span>
+              <span className={`px-1.5 py-0.2 rounded border font-semibold text-[10px] truncate ${catInfo.bgClass} ${catInfo.textClass} ${catInfo.borderClass}`}>
+                {catInfo.label}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="font-semibold text-slate-500 text-[11px] shrink-0">คะแนนเต็ม:</span>
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 truncate">
+                {assignment.maxScore} คะแนน
+              </span>
+            </div>
+          </div>
+
+          {assignment.description && (
+            <div className="pt-1 text-[10px] text-slate-500 border-t border-slate-100 truncate" title={assignment.description}>
+              {assignment.description}
+            </div>
+          )}
         </div>
 
         {/* Quick Batch Actions */}

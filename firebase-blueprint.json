@@ -120,6 +120,40 @@
         "evaluationNote": { "type": "string" }
       },
       "required": ["schoolName", "academicYear", "currentSemester"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "Examinations and formal tests created by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "semester": { "type": "number" },
+        "title": { "type": "string" },
+        "examType": { "type": "string" },
+        "maxScore": { "type": "number" },
+        "passingScore": { "type": "number" },
+        "strand": { "type": "string" },
+        "topic": { "type": "string" },
+        "examDate": { "type": "string" }
+      },
+      "required": ["id", "subjectId", "semester", "title", "maxScore", "examType"]
+    },
+    "ExamRecord": {
+      "title": "ExamRecord",
+      "description": "Student score records for an exam per classroom",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "examId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "classKey": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "number" },
+        "studentScores": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "examId", "subjectId", "classKey"]
     }
   },
   "firestore": {
@@ -146,6 +180,14 @@
     "attendance": {
       "entity": "Attendance",
       "description": "Collection of attendance sheets"
+    },
+    "exams": {
+      "entity": "Exam",
+      "description": "Collection of examinations and tests"
+    },
+    "exam_records": {
+      "entity": "ExamRecord",
+      "description": "Collection of student exam score records per classroom"
     },
     "settings": {
       "entity": "SchoolSettings",

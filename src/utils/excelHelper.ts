@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Student, StudentSubjectScore, Subject } from '../types';
+import { formatStrandDisplay } from './grading';
 
 export function downloadStudentTemplate() {
   const sampleData = [
@@ -238,7 +239,11 @@ export function exportEvaluationReportExcel(
       if (typeof val === 'number') {
         studentRawTotal += val;
       }
-      const colName = `${index + 1}. ${item.name} (เต็ม ${item.maxScore})`;
+      const strandVal = formatStrandDisplay(item.strand);
+      const strandInfo = strandVal ? ` [สาระที่ ${strandVal}]` : '';
+      const stdInfo = item.standard ? ` [มาตรฐาน ${item.standard}]` : '';
+      const indInfo = item.indicator ? ` [ตัวชี้วัด ${item.indicator}]` : '';
+      const colName = `${index + 1}. ${item.name}${strandInfo}${stdInfo}${indInfo} (เต็ม ${item.maxScore})`;
       row[colName] = val;
     });
 

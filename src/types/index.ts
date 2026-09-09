@@ -46,6 +46,12 @@ export interface Assignment {
   name: string; // เช่น ใบงานที่ 1, แบบฝึกหัดที่ 2, โครงงานกลุ่ม, สอบกลางภาค
   category: AssignmentCategory;
   maxScore: number; // คะแนนเต็ม ครูสามารถกำหนดได้เอง
+  strand?: string; // สาระที่ เช่น 1 หรือ สาระที่ 1
+  standard?: string; // มาตรฐาน เช่น ว 1.1, ค 1.1, ท 1.1
+  indicator?: string; // ตัวชี้วัด เช่น ว 1.1 ป.1/1 หรือ ป.1/1 หรือ 1
+  gradeLevel?: string; // ระดับชั้น (legacy)
+  indicatorNo?: string; // ตัวชี้วัดข้อที่ (legacy)
+  topic?: string; // เรื่อง เช่น การเปรียบเทียบเศษส่วน, แรงและการเคลื่อนที่, พืช
   description?: string;
   orderIndex?: number; // ลำดับการแสดงผลของช่องคะแนน
 }
@@ -69,6 +75,8 @@ export interface Subject {
   ratioSemester1?: SubjectGradingRatio;
   ratioSemester2?: SubjectGradingRatio;
   description?: string;
+  semester1TargetScore?: number; // คะแนนเก็บทั้งหมด ภาคเรียนที่ 1 (แทนคะแนนเต็ม 100 ค่าเริ่มต้น 100)
+  semester2TargetScore?: number; // คะแนนเก็บทั้งหมด ภาคเรียนที่ 2 (แทนคะแนนเต็ม 100 ค่าเริ่มต้น 100)
 }
 
 export interface SemesterScoreData {
@@ -176,5 +184,55 @@ export interface AttendanceSubjectSummary {
   todayLeaveCount: number;
   todaySickCount: number;
   overallAttendanceRate: number;
+}
+
+export type ExamType = 
+  | 'unit_quiz'      // แบบทดสอบย่อย / ท้ายบท
+  | 'midterm'        // สอบกลางภาคเรียน
+  | 'final'          // สอบปลายภาคเรียน
+  | 'practical'      // สอบปฏิบัติ / ทักษะ
+  | 'retest'         // สอบแก้ตัว
+  | 'custom';        // แบบทดสอบทั่วไป / กำหนดเอง
+
+export interface Exam {
+  id: string;
+  subjectId: string;
+  semester: 1 | 2;
+  title: string;            // ชื่อแบบทดสอบ เช่น แบบทดสอบท้ายบทที่ 1, การสอบกลางภาค
+  examType: ExamType;
+  maxScore: number;         // คะแนนเต็ม เช่น 20, 30, 50, 100
+  passingScore: number;     // เกณฑ์คะแนนผ่าน เช่น 10, 15, 50
+  strand?: string;          // สาระ (เช่น 1. วิทยาศาสตร์ชีวภาพ)
+  standard?: string;        // มาตรฐาน
+  indicator?: string;       // ตัวชี้วัด
+  topic?: string;           // เรื่อง / หน่วยการเรียนรู้
+  examDate?: string;        // วันที่จัดสอบ (YYYY-MM-DD)
+  description?: string;     // คำอธิบาย / หมายเหตุ
+  targetClasses?: string[]; // กำหนดห้องเรียน หรือถ้าว่างหมายถึงทุกห้องของวิชา
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExamStudentStatus = 'normal' | 'absent' | 'leave' | 'retested';
+
+export interface StudentExamScore {
+  studentId: string;
+  score?: number;           // คะแนนที่สอบได้ (ถ้ายังไม่ได้กรอกจะเป็น undefined)
+  status: ExamStudentStatus; // ปกติ, ขาดสอบ, ลา, สอบแก้ตัว
+  retestScore?: number;     // คะแนนสอบแก้ตัว (ถ้ามี)
+  note?: string;            // หมายเหตุ
+  submittedAt?: string;
+}
+
+export interface ExamRecord {
+  id: string;               // `exam_${examId}_${classKey}`
+  examId: string;
+  subjectId: string;
+  classKey: string;
+  academicYear: string;
+  semester: 1 | 2;
+  studentScores: Record<string, StudentExamScore>; // studentId -> StudentExamScore
+  updatedBy?: string;
+  updatedAt: string;
 }
 
