@@ -127,7 +127,7 @@ export const SubjectAttendance: React.FC<SubjectAttendanceProps> = ({
     if (initialClassKey && availableClasses.includes(initialClassKey)) {
       return initialClassKey;
     }
-    return availableClasses.length > 0 ? availableClasses[0] : 'ม.1/1';
+    return availableClasses.length > 0 ? availableClasses[0] : 'ป.1/1';
   });
 
   useEffect(() => {

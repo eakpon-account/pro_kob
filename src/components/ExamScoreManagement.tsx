@@ -16,6 +16,13 @@ import {
   BarChart3, 
   HelpCircle, 
   ChevronRight, 
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
+  Calculator,
+  Percent,
+  Info,
   Users, 
   Calendar, 
   Check, 
@@ -23,7 +30,8 @@ import {
   ArrowUpDown,
   BookOpen,
   Sparkles,
-  ClipboardList
+  ClipboardList,
+  Sliders
 } from 'lucide-react';
 import { 
   Student, 
@@ -37,7 +45,9 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { formatStrandDisplay, cleanStrandInput } from '../utils/strandFormatter';
+import { getSubjectRatio } from '../utils/grading';
 import { PrintExamModal } from './PrintExamModal';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface ExamScoreManagementProps {
   currentUser: User;
@@ -46,6 +56,7 @@ interface ExamScoreManagementProps {
   initialSubjectId?: string;
   initialClassKey?: string;
   onNavigateToSubjects?: () => void;
+  onNavigateToRatios?: (subjectId?: string) => void;
 }
 
 const EXAM_TYPE_LABELS: Record<ExamType, { label: string; badge: string }> = {
@@ -64,6 +75,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
   initialSubjectId,
   initialClassKey,
   onNavigateToSubjects,
+  onNavigateToRatios,
 }) => {
   // Filter available subjects based on user role (Admin/Executive sees all, Teacher sees assigned or all if none assigned yet)
   const accessibleSubjects = useMemo(() => {
@@ -138,11 +150,36 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
   // Currently selected Exam for score entry
   const [activeExamId, setActiveExamId] = useState<string>('');
 
+  // Expand/collapse state for exam list rows (ถ้าตารางไม่พอให้ซ่อน เรียกใช้โดยการกดขยาย)
+  const [expandedExamIds, setExpandedExamIds] = useState<Set<string>>(new Set());
+
+  const toggleExamExpanded = (id: string) => {
+    setExpandedExamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllExamsExpanded = () => {
+    if (expandedExamIds.size === filteredExams.length) {
+      setExpandedExamIds(new Set());
+    } else {
+      setExpandedExamIds(new Set(filteredExams.map((e) => e.id)));
+    }
+  };
+
   // Modal states
   const [showExamModal, setShowExamModal] = useState(false);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printExamTarget, setPrintExamTarget] = useState<Exam | null>(null);
+  const [examToDelete, setExamToDelete] = useState<Exam | null>(null);
+  const [isDeletingExam, setIsDeletingExam] = useState(false);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -200,6 +237,14 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
   const [workingScores, setWorkingScores] = useState<Record<string, StudentExamScore>>({});
   const [isDirty, setIsDirty] = useState(false);
 
+  // Ratios per subject and semester from score ratio management
+  const ratioSem1 = useMemo(() => getSubjectRatio(selectedSubject, 1), [selectedSubject]);
+  const ratioSem2 = useMemo(() => getSubjectRatio(selectedSubject, 2), [selectedSubject]);
+  const currentRatio = useMemo(() => {
+    if (selectedSemester === '2') return ratioSem2;
+    return ratioSem1;
+  }, [selectedSemester, ratioSem1, ratioSem2]);
+
   // Initialize working scores when active exam or class changes
   useEffect(() => {
     if (!activeExam || !selectedClassKey) {
@@ -210,10 +255,21 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
 
     const initial: Record<string, StudentExamScore> = {};
     const existingScores = currentExamRecord?.studentScores || {};
+    const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
 
     classStudents.forEach((student) => {
       if (existingScores[student.id]) {
-        initial[student.id] = { ...existingScores[student.id] };
+        const s = existingScores[student.id];
+        const computedScaled = s.scaledScore !== undefined 
+          ? s.scaledScore 
+          : (s.score !== undefined && rawMax > 0 
+              ? Number(((s.score / rawMax) * activeExam.maxScore).toFixed(2)) 
+              : undefined);
+
+        initial[student.id] = { 
+          ...s,
+          scaledScore: computedScaled
+        };
       } else {
         initial[student.id] = {
           studentId: student.id,
@@ -227,7 +283,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
     setIsDirty(false);
   }, [activeExam?.id, selectedClassKey, classStudents, currentExamRecord]);
 
-  // Score handlers - คะแนนสอบ ไม่ต้องใส่ 0 นำหน้า
+  // Score handlers - คะแนนสอบ ไม่ต้องใส่ 0 นำหน้า (เก็บบันทึกคะแนนดิบและคำนวณคะแนนจริงตามสัดส่วน)
   const handleScoreChange = (studentId: string, value: string) => {
     if (!activeExam) return;
     
@@ -247,6 +303,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
       setWorkingScores((prev) => {
         const current = { ...(prev[studentId] || { studentId, status: 'normal' }) };
         delete current.score;
+        delete current.scaledScore;
         return {
           ...prev,
           [studentId]: current,
@@ -258,12 +315,16 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
 
     const num = parseFloat(clean);
     if (!isNaN(num)) {
-      const clamped = Math.max(0, Math.min(activeExam.maxScore, num));
+      const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
+      const clamped = Math.max(0, Math.min(rawMax, num));
+      const scaled = rawMax > 0 ? Number(((clamped / rawMax) * activeExam.maxScore).toFixed(2)) : clamped;
+
       setWorkingScores((prev) => ({
         ...prev,
         [studentId]: {
           ...(prev[studentId] || { studentId, status: 'normal' }),
           score: clamped,
+          scaledScore: scaled,
         },
       }));
       setIsDirty(true);
@@ -299,12 +360,16 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
 
     const num = parseFloat(clean);
     if (!isNaN(num)) {
-      const clamped = Math.max(0, Math.min(activeExam.maxScore, num));
+      const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
+      const clamped = Math.max(0, Math.min(rawMax, num));
+      const scaled = rawMax > 0 ? Number(((clamped / rawMax) * activeExam.maxScore).toFixed(2)) : clamped;
+
       setWorkingScores((prev) => ({
         ...prev,
         [studentId]: {
           ...(prev[studentId] || { studentId, status: 'normal' }),
           retestScore: clamped,
+          scaledScore: scaled,
         },
       }));
       setIsDirty(true);
@@ -358,17 +423,19 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
   // Quick fill helpers
   const handleQuickFillMax = () => {
     if (!activeExam) return;
+    const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
     const updated = { ...workingScores };
     classStudents.forEach((st) => {
       updated[st.id] = {
         ...(updated[st.id] || { studentId: st.id }),
-        score: activeExam.maxScore,
+        score: rawMax,
+        scaledScore: activeExam.maxScore,
         status: 'normal',
       };
     });
     setWorkingScores(updated);
     setIsDirty(true);
-    showToast(`กรอกคะแนนเต็ม ${activeExam.maxScore} คะแนนให้นักเรียนทุกคนแล้ว`);
+    showToast(`กรอกคะแนนดิบเต็ม ${rawMax} คะแนน (เทียบเท่าคะแนนจริง ${activeExam.maxScore}) ให้นักเรียนทุกคนแล้ว`);
   };
 
   const handleQuickSetAllPresent = () => {
@@ -407,6 +474,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
     strand: string;
     topic: string;
     indicator: string;
+    rawMaxScore: number;
     maxScore: number;
     passingScore: number;
     examDate: string;
@@ -418,6 +486,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
     strand: '',
     topic: '',
     indicator: '',
+    rawMaxScore: 40,
     maxScore: 20,
     passingScore: 10,
     examDate: new Date().toISOString().split('T')[0],
@@ -433,6 +502,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
       strand: '',
       topic: '',
       indicator: '',
+      rawMaxScore: 40,
       maxScore: 20,
       passingScore: 10,
       examDate: new Date().toISOString().split('T')[0],
@@ -450,6 +520,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
       strand: exam.strand || '',
       topic: exam.topic || '',
       indicator: exam.indicator || '',
+      rawMaxScore: exam.rawMaxScore || exam.maxScore,
       maxScore: exam.maxScore,
       passingScore: exam.passingScore,
       examDate: exam.examDate || new Date().toISOString().split('T')[0],
@@ -467,6 +538,8 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
     }
 
     const cleanStrand = cleanStrandInput(examFormData.strand);
+    const rawMax = Number(examFormData.rawMaxScore) || Number(examFormData.maxScore) || 20;
+    const finalMaxScore = Number(examFormData.maxScore) || 20;
 
     const examData: Exam = {
       id: editingExam ? editingExam.id : `exam-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -477,8 +550,9 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
       strand: cleanStrand,
       topic: examFormData.topic.trim(),
       indicator: examFormData.indicator.trim(),
-      maxScore: Number(examFormData.maxScore) || 20,
-      passingScore: Number(examFormData.passingScore) || 10,
+      rawMaxScore: rawMax,
+      maxScore: finalMaxScore,
+      passingScore: Number(examFormData.passingScore) || Math.round(finalMaxScore * 0.5),
       examDate: examFormData.examDate,
       description: examFormData.description.trim(),
       createdAt: editingExam ? editingExam.createdAt : new Date().toISOString(),
@@ -512,10 +586,11 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
         semester: selectedSemester === '2' ? 2 : 1,
         strand: '1',
         topic: 'หน่วยการเรียนรู้ที่ 1',
+        rawMaxScore: 20,
         maxScore: 10,
         passingScore: 5,
         examDate: todayStr,
-        description: 'แบบทดสอบวัดความรู้ความเข้าใจท้ายหน่วยการเรียนรู้ที่ 1',
+        description: 'แบบทดสอบวัดความรู้ความเข้าใจท้ายหน่วยการเรียนรู้ที่ 1 (คะแนนเต็ม 10 คะแนน เกณฑ์ผ่าน 5 คะแนน)',
         createdAt: now,
         updatedAt: now,
       },
@@ -527,10 +602,11 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
         semester: selectedSemester === '2' ? 2 : 1,
         strand: '1',
         topic: 'หน่วยการเรียนรู้ที่ 2',
+        rawMaxScore: 20,
         maxScore: 10,
         passingScore: 5,
         examDate: todayStr,
-        description: 'แบบทดสอบวัดความรู้ความเข้าใจท้ายหน่วยการเรียนรู้ที่ 2',
+        description: 'แบบทดสอบวัดความรู้ความเข้าใจท้ายหน่วยการเรียนรู้ที่ 2 (คะแนนเต็ม 10 คะแนน เกณฑ์ผ่าน 5 คะแนน)',
         createdAt: now,
         updatedAt: now,
       },
@@ -542,10 +618,11 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
         semester: selectedSemester === '2' ? 2 : 1,
         strand: '1',
         topic: 'การวัดผลสัมฤทธิ์กลางภาคเรียน',
-        maxScore: 20,
-        passingScore: 10,
+        rawMaxScore: 40,
+        maxScore: currentRatio.midtermWeight,
+        passingScore: Math.round(currentRatio.midtermWeight * 0.5),
         examDate: todayStr,
-        description: 'การประเมินผลการเรียนรู้กลางภาคเรียน',
+        description: `การประเมินผลการเรียนรู้กลางภาคเรียน (คะแนนเต็มตามสัดส่วน ${currentRatio.midtermWeight} คะแนน เกณฑ์ผ่าน ${Math.round(currentRatio.midtermWeight * 0.5)} คะแนน)`,
         createdAt: now,
         updatedAt: now,
       },
@@ -557,10 +634,11 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
         semester: selectedSemester === '2' ? 2 : 1,
         strand: '1',
         topic: 'การวัดผลสัมฤทธิ์ปลายภาคเรียน',
-        maxScore: 30,
-        passingScore: 15,
+        rawMaxScore: 40,
+        maxScore: currentRatio.finalExamWeight,
+        passingScore: Math.round(currentRatio.finalExamWeight * 0.5),
         examDate: todayStr,
-        description: 'การประเมินผลการเรียนรู้ปลายภาคเรียน',
+        description: `การประเมินผลการเรียนรู้ปลายภาคเรียน (คะแนนเต็มตามสัดส่วน ${currentRatio.finalExamWeight} คะแนน เกณฑ์ผ่าน ${Math.round(currentRatio.finalExamWeight * 0.5)} คะแนน)`,
         createdAt: now,
         updatedAt: now,
       },
@@ -574,13 +652,34 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
   };
 
   const handleDeleteExam = (exam: Exam) => {
-    if (!window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบแบบทดสอบ "${exam.title}" ? ข้อมูลคะแนนสอบของแบบทดสอบนี้จะถูกลบด้วย`)) {
-      return;
+    setExamToDelete(exam);
+  };
+
+  const handleConfirmDeleteExam = () => {
+    if (!examToDelete) return;
+    setIsDeletingExam(true);
+    try {
+      storage.deleteExam(examToDelete.id);
+      const updatedExams = storage.getExams();
+      setExams(updatedExams);
+      setExamRecords(storage.getExamRecords());
+      if (activeExamId === examToDelete.id) {
+        const remainingForSubject = updatedExams.filter((e) => e.subjectId === selectedSubject?.id);
+        setActiveExamId(remainingForSubject[0]?.id || '');
+      }
+      showToast(`ลบแบบทดสอบ "${examToDelete.title}" เรียบร้อยแล้ว`);
+    } catch (err) {
+      console.error('Error deleting exam:', err);
+      showToast('เกิดข้อผิดพลาดในการลบแบบทดสอบ');
+    } finally {
+      setIsDeletingExam(false);
+      setExamToDelete(null);
     }
-    storage.deleteExam(exam.id);
-    setExams(storage.getExams());
-    setExamRecords(storage.getExamRecords());
-    showToast(`ลบแบบทดสอบ "${exam.title}" เรียบร้อยแล้ว`);
+  };
+
+  const handlePrintExam = (exam: Exam | null) => {
+    setPrintExamTarget(exam);
+    setShowPrintModal(true);
   };
 
   // Export CSV
@@ -647,7 +746,9 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
           sum += eff;
           if (eff > max) max = eff;
           if (eff < min) min = eff;
-          if (eff >= activeExam.passingScore) passed++;
+          const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
+          const scaledVal = sc.scaledScore !== undefined ? sc.scaledScore : (rawMax > 0 ? (eff / rawMax) * activeExam.maxScore : eff);
+          if (scaledVal >= activeExam.passingScore) passed++;
         }
       }
     });
@@ -792,6 +893,41 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
         </div>
       </div>
 
+      {/* Score Ratio Reference Banner */}
+      {selectedSubject && (
+        <div className="bg-gradient-to-r from-indigo-50/90 via-purple-50/70 to-blue-50/60 border border-indigo-200/80 rounded-2xl p-4 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs text-slate-700">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+              <Sliders className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 flex items-center gap-2">
+                <span>อ้างอิงสัดส่วนคะแนนสอบ: {selectedSubject.code} {selectedSubject.name}</span>
+                <span className="text-[10px] bg-indigo-100 text-indigo-800 font-extrabold px-2 py-0.5 rounded-full border border-indigo-200">
+                  {selectedSemester === '2' ? 'ภาคเรียนที่ 2' : selectedSemester === '1' ? 'ภาคเรียนที่ 1' : 'ภาคเรียนที่ 1 & 2'}
+                </span>
+              </div>
+              <div className="text-slate-600 mt-0.5">
+                สอบกลางภาค: <strong className="text-indigo-700 font-extrabold">{currentRatio.midtermWeight}</strong> คะแนน | 
+                สอบปลายภาค: <strong className="text-purple-700 font-extrabold">{currentRatio.finalExamWeight}</strong> คะแนน 
+                <span className="text-slate-500 ml-1.5">(สัดส่วนใบงาน {currentRatio.courseworkWeight} คะแนน | รวมเต็ม {currentRatio.totalTargetScore} คะแนน)</span>
+              </div>
+            </div>
+          </div>
+          {onNavigateToRatios && (
+            <button
+              type="button"
+              id="btn-goto-ratios-from-exams"
+              onClick={() => onNavigateToRatios(selectedSubject.id)}
+              className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50/80 px-3 py-1.5 rounded-xl border border-indigo-200 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+              <span>จัดการสัดส่วนคะแนน</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Main View Tabs */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-2">
         <div className="flex items-center gap-2">
@@ -882,124 +1018,389 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
               </div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold">
-                    <th className="py-3 px-4 w-12 text-center">ที่</th>
-                    <th className="py-3 px-4">ชื่อแบบทดสอบ</th>
-                    <th className="py-3 px-4 w-36">ประเภท</th>
-                    <th className="py-3 px-4">สาระการเรียนรู้</th>
-                    <th className="py-3 px-4">เรื่อง / หน่วย</th>
-                    <th className="py-3 px-3 w-16 text-center">ภาค</th>
-                    <th className="py-3 px-3 w-20 text-center">คะแนนเต็ม</th>
-                    <th className="py-3 px-3 w-20 text-center">เกณฑ์ผ่าน</th>
-                    <th className="py-3 px-4 w-36 text-center">สถานะการตรวจ</th>
-                    <th className="py-3 px-4 w-44 text-center">การทำงาน</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredExams.map((exam, idx) => {
-                    const typeCfg = EXAM_TYPE_LABELS[exam.examType] || EXAM_TYPE_LABELS.custom;
-                    // Check completion in selected class
-                    const record = examRecords.find((r) => r.examId === exam.id && r.classKey === selectedClassKey);
-                    const scoredCount = record 
-                      ? (Object.values(record.studentScores) as StudentExamScore[]).filter((s) => s.score !== undefined || s.status === 'absent' || s.status === 'leave').length 
-                      : 0;
-                    const totalStudentsInClass = classStudents.length;
-                    const isFullyGraded = totalStudentsInClass > 0 && scoredCount >= totalStudentsInClass;
+            <div>
+              {/* Header Actions Bar with Expand/Collapse & Ratio Info */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 border-b border-slate-200 bg-slate-50/70">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleAllExamsExpanded}
+                    className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    title={expandedExamIds.size === filteredExams.length ? 'ย่อตารางทั้งหมด' : 'กดขยายดูรายละเอียดทุกชุด'}
+                  >
+                    {expandedExamIds.size === filteredExams.length ? (
+                      <>
+                        <Minimize2 className="w-3.5 h-3.5 text-slate-500" />
+                        <span>ย่อตารางทั้งหมด</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>กดขยายดูครบทุกชุด ({filteredExams.length})</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-xs text-slate-500 hidden sm:inline">
+                    แสดงแบบทดสอบ {filteredExams.length} ชุด (ห้อง {selectedClassKey})
+                  </span>
+                </div>
 
-                    return (
-                      <tr key={exam.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3.5 px-4 text-center font-mono text-slate-400 font-medium">
-                          {idx + 1}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <div className="font-bold text-slate-800">{exam.title}</div>
-                          {exam.examDate && (
-                            <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                              <Calendar className="w-3 h-3" />
-                              <span>จัดสอบ: {exam.examDate}</span>
-                            </div>
+                <div className="flex items-center gap-2">
+                  <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-indigo-50 border border-indigo-100 rounded-xl text-[11px] text-indigo-900">
+                    <Calculator className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>คะแนนสอบเก็บบันทึกคะแนนดิบ แล้วหารเทียบตามสัดส่วนวิชา (รวมให้ครบ 100 คะแนน)</span>
+                  </div>
+                  <button
+                    onClick={handleOpenAddExamModal}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>สร้างแบบทดสอบ</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-semibold">
+                      <th className="py-3 px-3 w-12 text-center">ที่</th>
+                      <th className="py-3 px-4 min-w-48">ชื่อแบบทดสอบ</th>
+                      <th className="py-3 px-3 w-20 text-center">ภาคเรียน</th>
+                      <th className="py-3 px-3 w-28 text-center">
+                        คะแนนดิบ
+                        <div className="text-[10px] font-normal text-slate-400 font-mono">(เต็มดิบ)</div>
+                      </th>
+                      <th className="py-3 px-3 w-28 text-center">
+                        คะแนนเต็ม
+                        <div className="text-[10px] font-normal text-indigo-600 font-mono">(ตามสัดส่วน)</div>
+                      </th>
+                      <th className="py-3 px-3 w-28 text-center hidden md:table-cell">
+                        เกณฑ์ผ่าน
+                        <div className="text-[10px] font-normal text-emerald-600 font-mono">(จากคะแนนเต็ม)</div>
+                      </th>
+                      <th className="py-3 px-4 w-36 text-center">สถานะการตรวจ</th>
+                      <th className="py-3 px-4 w-52 text-center">การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredExams.map((exam, idx) => {
+                      const typeCfg = EXAM_TYPE_LABELS[exam.examType] || EXAM_TYPE_LABELS.custom;
+                      const rawMax = exam.rawMaxScore || exam.maxScore;
+                      const isExpanded = expandedExamIds.has(exam.id);
+
+                      // Check completion in selected class
+                      const record = examRecords.find((r) => r.examId === exam.id && r.classKey === selectedClassKey);
+                      const studentScoresList = record 
+                        ? (Object.values(record.studentScores) as StudentExamScore[])
+                        : [];
+                      const scoredCount = studentScoresList.filter(
+                        (s) => s.score !== undefined || s.status === 'absent' || s.status === 'leave'
+                      ).length;
+                      const totalStudentsInClass = classStudents.length;
+                      const isFullyGraded = totalStudentsInClass > 0 && scoredCount >= totalStudentsInClass;
+
+                      // Statistics for expanded view
+                      const validScores = studentScoresList
+                        .filter((s) => s.score !== undefined && s.status !== 'absent' && s.status !== 'leave')
+                        .map((s) => s.score as number);
+                      const passedCount = studentScoresList.filter((s) => {
+                        const eff = s.status === 'retested' && s.retestScore !== undefined ? s.retestScore : s.score;
+                        const scaledVal = s.scaledScore !== undefined ? s.scaledScore : (rawMax > 0 && eff !== undefined ? (eff / rawMax) * exam.maxScore : eff);
+                        return scaledVal !== undefined && scaledVal >= exam.passingScore && s.status !== 'absent' && s.status !== 'leave';
+                      }).length;
+                      const failedCount = validScores.length - passedCount;
+                      const absentCount = studentScoresList.filter((s) => s.status === 'absent' || s.status === 'leave').length;
+                      const avgRaw = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) : '-';
+                      const maxRaw = validScores.length > 0 ? Math.max(...validScores) : '-';
+                      const minRaw = validScores.length > 0 ? Math.min(...validScores) : '-';
+                      const avgScaled = validScores.length > 0 && rawMax > 0 
+                        ? ((Number(avgRaw) / rawMax) * exam.maxScore).toFixed(2) 
+                        : '-';
+
+                      return (
+                        <React.Fragment key={exam.id}>
+                          <tr className={`hover:bg-slate-50/70 transition-colors ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                            <td className="py-3.5 px-3 text-center font-mono text-slate-400 font-medium">
+                              {idx + 1}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-bold text-slate-800 text-xs">{exam.title}</div>
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold border ${typeCfg.badge}`}>
+                                  {typeCfg.label}
+                                </span>
+                                {exam.topic && (
+                                  <span className="text-[10px] text-slate-500 truncate max-w-[170px]" title={exam.topic}>
+                                    {exam.topic}
+                                  </span>
+                                )}
+                                {exam.examDate && (
+                                  <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                                    <Calendar className="w-2.5 h-2.5" />
+                                    <span>{exam.examDate}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-3 text-center">
+                              <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                เทอม {exam.semester}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-3 text-center">
+                              <div className="flex flex-col items-center justify-center">
+                                <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200">
+                                  {rawMax} ดิบ
+                                </span>
+                                {rawMax !== exam.maxScore ? (
+                                  <span className="text-[9px] text-indigo-600 font-medium mt-0.5">
+                                    หารเทียบสัดส่วน
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] text-slate-400 mt-0.5">
+                                    คะแนนเต็มตรง
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-3 text-center">
+                              <div className="flex flex-col items-center justify-center">
+                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
+                                  {exam.maxScore} คะแนน
+                                </span>
+                                <span className="text-[9px] text-slate-400 mt-0.5">
+                                  ตามสัดส่วนวิชา
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-3 text-center hidden md:table-cell">
+                              <div className="flex flex-col items-center justify-center">
+                                <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100" title={`เกณฑ์ผ่าน ${exam.passingScore} จากคะแนนเต็ม ${exam.maxScore} คะแนน`}>
+                                  ≥ {exam.passingScore} / {exam.maxScore}
+                                </span>
+                                <span className="text-[9px] text-slate-400 mt-0.5">
+                                  ({exam.maxScore > 0 ? ((exam.passingScore / exam.maxScore) * 100).toFixed(0) : 0}%)
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              {totalStudentsInClass === 0 ? (
+                                <span className="text-slate-400 text-[11px]">ไม่มีนักเรียน</span>
+                              ) : isFullyGraded ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>ครบ {scoredCount}/{totalStudentsInClass}</span>
+                                </span>
+                              ) : scoredCount > 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                  <Clock className="w-3 h-3" />
+                                  <span>บันทึก {scoredCount}/{totalStudentsInClass}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">
+                                  ยังไม่กรอกคะแนน
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                <button
+                                  onClick={() => {
+                                    setActiveExamId(exam.id);
+                                    setActiveTab('score_entry');
+                                  }}
+                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                  title="ตรวจและบันทึกคะแนนสอบของชุดนี้"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>ตรวจ/ลงคะแนน</span>
+                                </button>
+                                <button
+                                  onClick={() => toggleExamExpanded(exam.id)}
+                                  className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border ${
+                                    isExpanded
+                                      ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                                  }`}
+                                  title={isExpanded ? 'ย่อรายละเอียดแบบทดสอบ' : 'กดขยายดูรายละเอียด เกณฑ์ผ่าน และสถิติ'}
+                                >
+                                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                  <span>{isExpanded ? 'ย่อ' : 'กดขยาย'}</span>
+                                </button>
+                                <button
+                                  onClick={() => handleOpenEditExamModal(exam)}
+                                  className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title="แก้ไขข้อมูลแบบทดสอบ"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteExam(exam)}
+                                  className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="ลบแบบทดสอบนี้"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* EXPANDED ACCORDION ROW: แสดงรายละเอียดเต็มเมื่อกดขยาย */}
+                          {isExpanded && (
+                            <tr className="bg-slate-50/60 border-b border-slate-200">
+                              <td colSpan={8} className="p-4 sm:p-5">
+                                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-4">
+                                  
+                                  {/* Title & Badge */}
+                                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                                        <Calculator className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                        <h5 className="font-bold text-slate-800 text-sm">{exam.title}</h5>
+                                        <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                                          <span>{typeCfg.label}</span>
+                                          <span>•</span>
+                                          <span>ภาคเรียนที่ {exam.semester}</span>
+                                          {exam.examDate && (
+                                            <>
+                                              <span>•</span>
+                                              <span>วันที่จัดสอบ: {exam.examDate}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setActiveExamId(exam.id);
+                                          setActiveTab('score_entry');
+                                        }}
+                                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                        <span>บันทึกคะแนนห้อง {selectedClassKey}</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleOpenEditExamModal(exam)}
+                                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                                        <span>แก้ไข</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* 3 Information Cards */}
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {/* 1. Raw to Scaled Calculation Formula */}
+                                    <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3">
+                                      <div className="text-xs font-bold text-indigo-900 flex items-center gap-1.5 mb-2">
+                                        <Percent className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>การหารคะแนนดิบตามสัดส่วน</span>
+                                      </div>
+                                      <div className="space-y-1.5 text-[11px] text-slate-700">
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">คะแนนดิบเต็ม:</span>
+                                          <strong className="font-mono text-slate-800">{rawMax} คะแนน</strong>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">คะแนนเต็มตามสัดส่วน:</span>
+                                          <strong className="font-mono text-indigo-700">{exam.maxScore} คะแนน</strong>
+                                        </div>
+                                        <div className="pt-1.5 border-t border-indigo-100 font-mono text-[10px] text-indigo-950 bg-white/70 p-1.5 rounded border">
+                                          สูตร: <code>(คะแนนดิบ ÷ {rawMax}) × {exam.maxScore}</code>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-1">
+                                          คิดเป็นสัดส่วน {exam.maxScore}% รวมกับคะแนนเก็บเพื่อคิดเกรดเต็ม 100
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* 2. Educational Metadata & Passing Threshold */}
+                                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3">
+                                      <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
+                                        <BookOpen className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>เกณฑ์ผ่านและเนื้อหา</span>
+                                      </div>
+                                      <div className="space-y-1 text-[11px] text-slate-600">
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">เกณฑ์ผ่าน (จากคะแนนเต็ม):</span>
+                                          <strong className="font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                                            ≥ {exam.passingScore} จาก {exam.maxScore} คะแนน ({exam.maxScore > 0 ? ((exam.passingScore / exam.maxScore) * 100).toFixed(0) : 0}%)
+                                          </strong>
+                                        </div>
+                                        {rawMax !== exam.maxScore && (
+                                          <div className="text-[10px] text-slate-400">
+                                            (เทียบเท่าคะแนนดิบข้อสอบ ≥ {exam.maxScore > 0 ? ((exam.passingScore / exam.maxScore) * rawMax).toFixed(1) : 0} จาก {rawMax} คะแนนดิบ)
+                                          </div>
+                                        )}
+                                        <div>
+                                          <span className="text-slate-500">สาระการเรียนรู้: </span>
+                                          <span className="font-medium text-slate-700">{formatStrandDisplay(exam.strand) || '-'}</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500">เรื่อง / หน่วย: </span>
+                                          <span className="font-medium text-slate-700">{exam.topic || '-'}</span>
+                                        </div>
+                                        {exam.indicator && (
+                                          <div>
+                                            <span className="text-slate-500">ตัวชี้วัด: </span>
+                                            <span className="text-slate-700">{exam.indicator}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* 3. Room Statistics */}
+                                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3">
+                                      <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
+                                        <BarChart3 className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>สถิติห้อง {selectedClassKey}</span>
+                                      </div>
+                                      <div className="space-y-1 text-[11px] text-slate-600">
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">ตรวจแล้ว:</span>
+                                          <span className="font-bold text-slate-800">{scoredCount} / {totalStudentsInClass} คน</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">ผ่าน / ไม่ผ่าน:</span>
+                                          <span>
+                                            <strong className="text-emerald-700">{passedCount}</strong> / <strong className="text-rose-600">{failedCount > 0 ? failedCount : 0}</strong>
+                                            {absentCount > 0 && <span className="text-slate-400 text-[10px]"> (ขาด/ลา {absentCount})</span>}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">คะแนนดิบเฉลี่ย:</span>
+                                          <span className="font-mono font-bold text-slate-800">{avgRaw} (สูง {maxRaw} / ต่ำ {minRaw})</span>
+                                        </div>
+                                        <div className="flex justify-between pt-1 border-t border-slate-200">
+                                          <span className="text-slate-500">คะแนนจริงเฉลี่ย:</span>
+                                          <span className="font-mono font-bold text-indigo-700">{avgScaled} / {exam.maxScore}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {exam.description && (
+                                    <div className="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                      <span className="font-semibold text-slate-700">คำอธิบาย: </span>
+                                      {exam.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeCfg.badge}`}>
-                            {typeCfg.label}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600 font-medium">
-                          {formatStrandDisplay(exam.strand)}
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-600">
-                          {exam.topic || '-'}
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <span className="font-mono font-bold text-slate-700">เทอม {exam.semester}</span>
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                            {exam.maxScore}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
-                            {exam.passingScore}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          {totalStudentsInClass === 0 ? (
-                            <span className="text-slate-400 text-[11px]">ไม่มีนักเรียน</span>
-                          ) : isFullyGraded ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>ครบ {scoredCount}/{totalStudentsInClass}</span>
-                            </span>
-                          ) : scoredCount > 0 ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                              <Clock className="w-3 h-3" />
-                              <span>บันทึก {scoredCount}/{totalStudentsInClass}</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">
-                              ยังไม่กรอกคะแนน
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                setActiveExamId(exam.id);
-                                setActiveTab('score_entry');
-                              }}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                              title="บันทึกคะแนนสอบของชุดนี้"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>ตรวจ/ลงคะแนน</span>
-                            </button>
-                            <button
-                              onClick={() => handleOpenEditExamModal(exam)}
-                              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                              title="แก้ไขข้อมูลแบบทดสอบ"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-blue-600" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteExam(exam)}
-                              className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="ลบแบบทดสอบนี้"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -1026,6 +1427,34 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                     </option>
                   ))}
                 </select>
+                {activeExam && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditExamModal(activeExam)}
+                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                      title="แก้ไขข้อมูลแบบทดสอบนี้"
+                    >
+                      <Edit3 className="w-4 h-4 text-blue-600" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteExam(activeExam)}
+                      className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                      title="ลบแบบทดสอบนี้"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-500" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePrintExam(activeExam)}
+                      className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                      title="พิมพ์ใบลงคะแนนสอบ"
+                    >
+                      <Printer className="w-4 h-4 text-indigo-600" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {activeExam && (
@@ -1033,8 +1462,8 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                   <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
                     คะแนนเต็ม: {activeExam.maxScore} คะแนน
                   </span>
-                  <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
-                    เกณฑ์ผ่าน: {activeExam.passingScore} คะแนน
+                  <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100" title="เกณฑ์ผ่านกำหนดจากคะแนนเต็ม">
+                    เกณฑ์ผ่าน: ≥ {activeExam.passingScore} คะแนน ({activeExam.maxScore > 0 ? ((activeExam.passingScore / activeExam.maxScore) * 100).toFixed(0) : 0}% ของคะแนนเต็ม)
                   </span>
                   {activeExam.strand && (
                     <span className="text-slate-500">
@@ -1138,18 +1567,40 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
               </div>
             ) : (
               <div className="overflow-x-auto">
+                {activeExam && (
+                  <div className="bg-indigo-50/70 border-b border-indigo-100 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 text-indigo-900">
+                      <Calculator className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>
+                        ระบบคำนวณสัดส่วน: เก็บคะแนนดิบเต็ม <strong>{activeExam.rawMaxScore || activeExam.maxScore} คะแนน</strong> หารแปลงเป็นคะแนนจริงตามสัดส่วน <strong>{activeExam.maxScore} คะแนน</strong>
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-emerald-800 bg-white/90 px-3 py-1 rounded-full border border-emerald-200/70 font-medium">
+                      เกณฑ์ผ่าน: <strong>≥ {activeExam.passingScore} / {activeExam.maxScore} คะแนน</strong> ({activeExam.maxScore > 0 ? ((activeExam.passingScore / activeExam.maxScore) * 100).toFixed(0) : 0}% ของคะแนนเต็ม)
+                      {(activeExam.rawMaxScore || activeExam.maxScore) !== activeExam.maxScore && (
+                        <span className="text-slate-500 ml-1.5 font-normal">
+                          (เทียบเท่าคะแนนดิบ ≥ {((activeExam.passingScore / activeExam.maxScore) * (activeExam.rawMaxScore || activeExam.maxScore)).toFixed(1)})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-semibold">
                       <th className="py-3 px-3 w-12 text-center">เลขที่</th>
                       <th className="py-3 px-3 w-20 text-center">รหัสนักเรียน</th>
                       <th className="py-3 px-4 min-w-44">ชื่อ - นามสกุล</th>
-                      <th className="py-3 px-3 w-28 text-center">
-                        คะแนนสอบ
-                        <div className="text-[10px] font-normal text-slate-400 font-mono">(เต็ม {activeExam.maxScore})</div>
+                      <th className="py-3 px-3 w-28 text-center bg-slate-100/50">
+                        คะแนนดิบที่ได้
+                        <div className="text-[10px] font-normal text-slate-500 font-mono">(เต็มดิบ {activeExam.rawMaxScore || activeExam.maxScore})</div>
                       </th>
-                      <th className="py-3 px-3 w-32 text-center">สถานะการสอบ</th>
-                      <th className="py-3 px-3 w-24 text-center">คะแนนแก้ตัว</th>
+                      <th className="py-3 px-3 w-28 text-center bg-indigo-50/70 border-x border-indigo-100/80">
+                        คะแนนตามสัดส่วน
+                        <div className="text-[10px] font-semibold text-indigo-700 font-mono">(เต็มจริง {activeExam.maxScore})</div>
+                      </th>
+                      <th className="py-3 px-3 w-28 text-center">สถานะการสอบ</th>
+                      <th className="py-3 px-3 w-24 text-center">คะแนนแก้ตัว (ดิบ)</th>
                       <th className="py-3 px-3 w-16 text-center">ร้อยละ (%)</th>
                       <th className="py-3 px-3 w-24 text-center">ผลประเมิน</th>
                       <th className="py-3 px-4 min-w-40">หมายเหตุ</th>
@@ -1169,11 +1620,19 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                       const isRetest = status === 'retested';
                       const hasScore = scoreData.score !== undefined;
                       const hasRetest = isRetest && scoreData.retestScore !== undefined;
-                      const effectiveScore = hasRetest ? (scoreData.retestScore as number) : (scoreData.score ?? 0);
-                      const percent = activeExam.maxScore > 0 && (hasScore || hasRetest) 
-                        ? ((effectiveScore / activeExam.maxScore) * 100).toFixed(0) 
+                      const effectiveRawScore = hasRetest ? (scoreData.retestScore as number) : (scoreData.score ?? 0);
+                      const rawMax = activeExam.rawMaxScore || activeExam.maxScore;
+                      
+                      // Calculate proportional scaled score
+                      const computedScaledScore = rawMax > 0 && (hasScore || hasRetest)
+                        ? Number(((effectiveRawScore / rawMax) * activeExam.maxScore).toFixed(2))
+                        : undefined;
+                      const displayScaled = scoreData.scaledScore !== undefined ? scoreData.scaledScore : computedScaledScore;
+
+                      const percent = rawMax > 0 && (hasScore || hasRetest) 
+                        ? ((effectiveRawScore / rawMax) * 100).toFixed(0) 
                         : '-';
-                      const isPassed = !isAbsent && !isLeave && (hasScore || hasRetest) && effectiveScore >= activeExam.passingScore;
+                      const isPassed = !isAbsent && !isLeave && (hasScore || hasRetest) && (displayScaled !== undefined ? displayScaled : computedScaledScore ?? 0) >= activeExam.passingScore;
 
                       return (
                         <tr 
@@ -1194,8 +1653,8 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                             </span>
                           </td>
                           
-                          {/* Score Input */}
-                          <td className="py-2.5 px-3 text-center">
+                          {/* Raw Score Input */}
+                          <td className="py-2.5 px-3 text-center bg-slate-50/30">
                             <input
                               type="text"
                               inputMode="decimal"
@@ -1214,6 +1673,22 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                                   : 'bg-rose-50 border-rose-200 text-rose-700 focus:border-rose-500 focus:ring-2 focus:ring-rose-100'
                               }`}
                             />
+                          </td>
+
+                          {/* Calculated Scaled Score Display */}
+                          <td className="py-2.5 px-3 text-center bg-indigo-50/30 border-x border-indigo-100/60 font-mono">
+                            {isAbsent ? (
+                              <span className="text-rose-500 text-[11px] font-semibold">0 (ขาดสอบ)</span>
+                            ) : isLeave ? (
+                              <span className="text-amber-600 text-[11px] font-semibold">ลา</span>
+                            ) : displayScaled !== undefined ? (
+                              <span className="inline-flex items-center gap-1 font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg text-xs shadow-2xs">
+                                {displayScaled}
+                                <span className="text-[10px] font-normal text-indigo-400">/{activeExam.maxScore}</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
                           </td>
 
                           {/* Status Select */}
@@ -1239,7 +1714,7 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                                 value={scoreData.retestScore !== undefined ? String(scoreData.retestScore) : ''}
                                 onChange={(e) => handleRetestScoreChange(student.id, e.target.value)}
                                 onFocus={(e) => e.target.select()}
-                                placeholder="คะแนนใหม่"
+                                placeholder="คะแนนดิบใหม่"
                                 className="w-20 text-center font-mono font-bold py-1 px-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 outline-none text-xs focus:ring-2 focus:ring-amber-200"
                               />
                             ) : (
@@ -1520,43 +1995,120 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
                 </div>
               </div>
 
-              {/* Score & Passing Score */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    คะแนนเต็ม <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    required
-                    value={examFormData.maxScore}
-                    onChange={(e) => {
-                      const max = Number(e.target.value) || 0;
-                      setExamFormData({
-                        ...examFormData,
-                        maxScore: max,
-                        passingScore: Math.round(max * 0.5),
-                      });
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-700 font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
+              {/* Score Ratio & Calculation Settings */}
+              <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                    <Calculator className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>การกำหนดคะแนนเต็มและเกณฑ์คะแนนผ่าน</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-600 font-medium">รวมคะแนนครบ 100 ตามสัดส่วนวิชา</span>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    เกณฑ์คะแนนผ่าน <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={examFormData.maxScore}
-                    required
-                    value={examFormData.passingScore}
-                    onChange={(e) => setExamFormData({ ...examFormData, passingScore: Number(e.target.value) || 0 })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-emerald-700 font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      คะแนนเต็มตามสัดส่วน <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      required
+                      value={examFormData.maxScore}
+                      onChange={(e) => {
+                        const newMax = Number(e.target.value) || 0;
+                        const ratio = examFormData.maxScore > 0 ? examFormData.passingScore / examFormData.maxScore : 0.5;
+                        const newPass = Math.max(1, Math.round(newMax * (ratio || 0.5)));
+                        setExamFormData({
+                          ...examFormData,
+                          maxScore: newMax,
+                          passingScore: newPass,
+                        });
+                      }}
+                      className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-700 font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">คะแนนจริงใน ปพ.5 เช่น 20</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      คะแนนดิบเต็ม (Raw) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={300}
+                      required
+                      value={examFormData.rawMaxScore}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value) || 0;
+                        setExamFormData({
+                          ...examFormData,
+                          rawMaxScore: raw,
+                        });
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">คะแนนในชุดข้อสอบ เช่น 40</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      เกณฑ์คะแนนผ่าน (กำหนดจากคะแนนเต็ม) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={examFormData.maxScore}
+                      step="any"
+                      required
+                      value={examFormData.passingScore}
+                      onChange={(e) => setExamFormData({ ...examFormData, passingScore: Number(e.target.value) || 0 })}
+                      className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs font-bold text-emerald-700 font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
+                      {[50, 60, 70, 80].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => {
+                            const val = Number(((examFormData.maxScore * pct) / 100).toFixed(1));
+                            setExamFormData({ ...examFormData, passingScore: val });
+                          }}
+                          className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border cursor-pointer transition-colors ${
+                            examFormData.maxScore > 0 && Math.round((examFormData.passingScore / examFormData.maxScore) * 100) === pct
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-emerald-900 bg-emerald-50/70 p-2.5 rounded-lg border border-emerald-100 flex items-start gap-2">
+                  <Award className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span>
+                      เกณฑ์ผ่าน: <strong>≥ {examFormData.passingScore} จากคะแนนเต็ม {examFormData.maxScore} คะแนน</strong>{' '}
+                      ({examFormData.maxScore > 0 ? ((examFormData.passingScore / examFormData.maxScore) * 100).toFixed(0) : 0}% ของคะแนนเต็ม)
+                    </span>
+                    {(examFormData.rawMaxScore || examFormData.maxScore) !== examFormData.maxScore && (
+                      <div className="text-[10px] text-emerald-700 mt-0.5">
+                        เทียบเท่าคะแนนดิบข้อสอบ ≥ {examFormData.maxScore > 0 ? (((examFormData.passingScore / examFormData.maxScore) * (examFormData.rawMaxScore || examFormData.maxScore))).toFixed(1) : 0} จากเต็ม {examFormData.rawMaxScore} คะแนน
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-indigo-800 bg-white/80 p-2 rounded-lg border border-indigo-100/80 flex items-center gap-2">
+                  <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>
+                    สูตรคำนวณอัตโนมัติ: <strong>คะแนนจริง = (คะแนนดิบที่ได้ ÷ {examFormData.rawMaxScore || examFormData.maxScore}) × {examFormData.maxScore}</strong>
+                  </span>
                 </div>
               </div>
 
@@ -1622,6 +2174,23 @@ export const ExamScoreManagement: React.FC<ExamScoreManagementProps> = ({
           examRecord={printExamTarget ? examRecords.find((r) => r.examId === printExamTarget.id && r.classKey === selectedClassKey) : undefined}
           allRecords={examRecords}
           schoolSettings={schoolSettings}
+        />
+      )}
+
+      {/* CONFIRM DELETE EXAM MODAL */}
+      {examToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!examToDelete}
+          title="ยืนยันการลบแบบทดสอบ"
+          itemTitle={examToDelete.title}
+          itemSubtitle={`วิชา ${selectedSubject?.name || ''} (${selectedSubject?.code || ''}) • ภาคเรียนที่ ${examToDelete.semester} • คะแนนเต็ม ${examToDelete.maxScore} คะแนน`}
+          warningMessage="คุณแน่ใจหรือไม่ว่าต้องการลบแบบทดสอบนี้? ข้อมูลการบันทึกคะแนนสอบของนักเรียนทั้งหมดในแบบทดสอบนี้จะถูกลบออกจากระบบอย่างถาวรและไม่สามารถกู้คืนได้"
+          confirmLabel={isDeletingExam ? 'กำลังลบ...' : 'ยืนยันการลบแบบทดสอบ'}
+          isLoading={isDeletingExam}
+          onConfirm={handleConfirmDeleteExam}
+          onClose={() => {
+            if (!isDeletingExam) setExamToDelete(null);
+          }}
         />
       )}
 

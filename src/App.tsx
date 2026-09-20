@@ -18,8 +18,14 @@ import {
   SubjectAttendance 
 } from './components/SubjectAttendance';
 import { 
+  ScoreRatioManagement 
+} from './components/ScoreRatioManagement';
+import { 
   StudentManagement 
 } from './components/StudentManagement';
+import { 
+  StudentPromotion 
+} from './components/StudentPromotion';
 import { 
   SubjectManagement 
 } from './components/SubjectManagement';
@@ -54,7 +60,7 @@ import {
   User 
 } from './types';
 import { storage } from './services/storage';
-import { Menu, Plus, Database, Sparkles, Award, UserCheck, ShieldCheck, LogIn, ArrowRightLeft, Settings, Cloud, RefreshCw } from 'lucide-react';
+import { Menu, Plus, Database, Sparkles, Award, UserCheck, ShieldCheck, LogIn, ArrowRightLeft, Settings, Cloud, RefreshCw, Calendar, GraduationCap, History } from 'lucide-react';
 import { MainTabType } from './components/Navbar';
 
 export default function App() {
@@ -73,6 +79,32 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  // Academic Year State & History Context
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(() => {
+    return storage.getSchoolSettings().academicYear || '2568';
+  });
+
+  const availableAcademicYears = React.useMemo(() => {
+    return storage.getAvailableAcademicYears();
+  }, [students, scores]);
+
+  // Projected Students and Scores for the selected Academic Year
+  const activeYearStudents = React.useMemo(() => {
+    return storage.getStudentsForAcademicYear(selectedAcademicYear);
+  }, [selectedAcademicYear, students]);
+
+  const activeYearScores = React.useMemo(() => {
+    const hasYearSpecific = scores.some((s) => s.academicYear === selectedAcademicYear);
+    if (hasYearSpecific) {
+      return scores.filter((s) => s.academicYear === selectedAcademicYear);
+    }
+    const currentSchoolYear = storage.getSchoolSettings().academicYear || '2568';
+    if (selectedAcademicYear === currentSchoolYear) {
+      return scores.filter((s) => !s.academicYear || s.academicYear === currentSchoolYear);
+    }
+    return scores.filter((s) => s.academicYear === selectedAcademicYear);
+  }, [selectedAcademicYear, scores]);
 
   // Deep Link Selection from Dashboard to Grading
   const [targetGradingSubjectId, setTargetGradingSubjectId] = useState<string | undefined>(undefined);
@@ -176,6 +208,13 @@ export default function App() {
     setCurrentTab('cut_grade');
   };
 
+  const handleNavigateToRatios = (subjectId?: string) => {
+    if (subjectId) {
+      setTargetGradingSubjectId(subjectId);
+    }
+    setCurrentTab('ratios');
+  };
+
   const handleOpenPrintModal = (
     subject: Subject,
     classKey: string,
@@ -205,8 +244,10 @@ export default function App() {
       case 'grading': return 'บันทึกคะแนนและตัดเกรด (2 ภาคเรียน)';
       case 'exams': return 'เก็บบันทึกคะแนนสอบ (Exams & Assessments)';
       case 'cut_grade': return 'ระบบตัดเกรด 2 ภาคเรียน (เกณฑ์ 100 คะแนน)';
-      case 'students': return 'ทะเบียนรายชื่อนักเรียน';
       case 'subjects': return 'รายวิชาและกำหนดสัดส่วนคะแนน';
+      case 'ratios': return 'กำหนดและจัดการสัดส่วนคะแนน (Score Ratio Management)';
+      case 'students': return 'ทะเบียนรายชื่อนักเรียน';
+      case 'promotion': return 'ระบบเลื่อนชั้นเรียนและประวัติการศึกษา (Student Grade Promotion)';
       case 'settings':
       case 'users': return 'การตั้งค่าระบบและการจัดการข้อมูล (System Settings)';
       default: return 'ระบบตัดเกรด';
@@ -245,7 +286,7 @@ export default function App() {
       <main className="flex-1 flex flex-col h-full bg-slate-50/30 overflow-hidden">
         
         {/* Header Bar */}
-        <header className="border-b border-slate-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2.5 shrink-0 z-20 shadow-2xs">
+        <header className="border-b border-slate-200 bg-white px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0 z-20 shadow-2xs">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileMenuOpen(true)}
@@ -259,6 +300,27 @@ export default function App() {
               <h2 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
                 {getPageTitle()}
               </h2>
+            </div>
+
+            {/* Academic Year Global Context Selector */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-200 bg-purple-50/90 text-purple-900 shadow-2xs">
+              <Calendar className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+              <div className="flex items-center gap-1 text-xs">
+                <span className="font-semibold text-purple-700 hidden md:inline">ปีการศึกษา:</span>
+                <select
+                  id="global-academic-year-selector"
+                  value={selectedAcademicYear}
+                  onChange={(e) => setSelectedAcademicYear(e.target.value)}
+                  className="bg-transparent border-0 font-bold text-purple-950 focus:ring-0 p-0 text-xs cursor-pointer"
+                  title="สลับปีการศึกษาเพื่อดูข้อมูลนักเรียนและคะแนนย้อนหลัง"
+                >
+                  {availableAcademicYears.map((yr) => (
+                    <option key={yr} value={yr}>
+                      ปี {yr} {yr === storage.getSchoolSettings().academicYear ? '(ปัจจุบัน)' : '(ย้อนหลัง)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -322,6 +384,24 @@ export default function App() {
           </div>
         </header>
 
+        {/* Historical Year Viewing Notice */}
+        {selectedAcademicYear !== storage.getSchoolSettings().academicYear && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2 text-xs font-semibold text-amber-900 flex flex-wrap items-center justify-between gap-2 shrink-0 animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                กำลังดูข้อมูลและคะแนนย้อนหลังประจำปีการศึกษา <strong>{selectedAcademicYear}</strong> (ข้อมูลเกรดและผลการเรียนในอดีต)
+              </span>
+            </div>
+            <button
+              onClick={() => setSelectedAcademicYear(storage.getSchoolSettings().academicYear || '2568')}
+              className="text-amber-800 hover:text-amber-950 underline text-xs cursor-pointer font-bold"
+            >
+              กลับสู่ปีการศึกษาปัจจุบัน ({storage.getSchoolSettings().academicYear || '2568'})
+            </button>
+          </div>
+        )}
+
         {/* Sync Toast Notification */}
         {syncToast && (
           <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-medium flex items-center justify-between shadow-xs animate-fadeIn shrink-0">
@@ -344,9 +424,9 @@ export default function App() {
             
             {currentTab === 'dashboard' && (
               <Dashboard
-                students={students}
+                students={activeYearStudents}
                 subjects={subjects}
-                scores={scores}
+                scores={activeYearScores}
                 onSelectClassAndSubject={handleSelectClassAndSubjectFromDashboard}
                 onNavigateToCutGrade={handleNavigateToCutGradeFromDashboard}
               />
@@ -355,7 +435,7 @@ export default function App() {
             {currentTab === 'attendance' && (
               <SubjectAttendance
                 currentUser={currentUser}
-                students={students}
+                students={activeYearStudents}
                 subjects={subjects}
                 initialSubjectId={targetGradingSubjectId}
                 initialClassKey={targetGradingClassKey}
@@ -364,49 +444,45 @@ export default function App() {
 
             {currentTab === 'grading' && (
               <ScoreGrading
-                students={students}
+                students={activeYearStudents}
                 subjects={subjects}
                 assignments={assignments}
-                scores={scores}
+                scores={activeYearScores}
                 onUpdateScores={setScores}
                 onUpdateAssignments={setAssignments}
                 onUpdateSubjects={setSubjects}
                 onOpenPrintModal={handleOpenPrintModal}
                 initialSubjectId={targetGradingSubjectId}
                 initialClassKey={targetGradingClassKey}
+                onNavigateToRatios={handleNavigateToRatios}
               />
             )}
 
             {currentTab === 'exams' && (
               <ExamScoreManagement
                 currentUser={currentUser}
-                students={students}
+                students={activeYearStudents}
                 subjects={subjects}
                 initialSubjectId={targetGradingSubjectId}
                 initialClassKey={targetGradingClassKey}
                 onNavigateToSubjects={() => setCurrentTab('subjects')}
+                onNavigateToRatios={handleNavigateToRatios}
               />
             )}
 
             {currentTab === 'cut_grade' && (
               <GradeCalculation
                 currentUser={currentUser}
-                students={students}
+                students={activeYearStudents}
                 subjects={subjects}
                 assignments={assignments}
-                scores={scores}
+                scores={activeYearScores}
                 onUpdateScores={setScores}
                 onUpdateSubjects={setSubjects}
                 initialSubjectId={targetGradingSubjectId}
                 initialClassKey={targetGradingClassKey}
                 onNavigateToSubjects={() => setCurrentTab('subjects')}
-              />
-            )}
-
-            {currentTab === 'students' && (
-              <StudentManagement
-                students={students}
-                onUpdateStudents={setStudents}
+                onNavigateToRatios={handleNavigateToRatios}
               />
             )}
 
@@ -416,6 +492,50 @@ export default function App() {
                 currentUser={currentUser}
                 onUpdateSubjects={setSubjects}
                 onNavigateToUsers={() => handleNavigateToSettings('users')}
+                onNavigateToRatios={handleNavigateToRatios}
+              />
+            )}
+
+            {currentTab === 'ratios' && (
+              <ScoreRatioManagement
+                currentUser={currentUser}
+                subjects={subjects}
+                assignments={assignments}
+                onUpdateSubjects={setSubjects}
+                onNavigateToGrading={(subjectId) => {
+                  setTargetGradingSubjectId(subjectId);
+                  setCurrentTab('grading');
+                }}
+                onNavigateToExams={(subjectId) => {
+                  setTargetGradingSubjectId(subjectId);
+                  setCurrentTab('exams');
+                }}
+                onNavigateToCutGrade={(subjectId) => {
+                  setTargetGradingSubjectId(subjectId);
+                  setCurrentTab('cut_grade');
+                }}
+                initialSubjectId={targetGradingSubjectId}
+              />
+            )}
+
+            {currentTab === 'students' && (
+              <StudentManagement
+                students={activeYearStudents}
+                onUpdateStudents={setStudents}
+                activeAcademicYear={selectedAcademicYear}
+                onNavigateToPromotion={() => setCurrentTab('promotion')}
+              />
+            )}
+
+            {currentTab === 'promotion' && (
+              <StudentPromotion
+                currentUser={currentUser}
+                initialAcademicYear={selectedAcademicYear}
+                onNavigateToTab={(tab) => setCurrentTab(tab)}
+                onPromotionCompleted={(newYear) => {
+                  setSelectedAcademicYear(newYear);
+                  reloadAllData();
+                }}
               />
             )}
 

@@ -1,7 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus, Exam, ExamRecord } from '../types';
+import { Assignment, FirebaseCustomConfig, SchoolSettings, Student, StudentSubjectScore, Subject, User, StudentAttendanceRecord, AttendanceStatus, Exam, ExamRecord, PromotionRecord, StudentAcademicHistory } from '../types';
 import { INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, INITIAL_USERS, generateInitialScores, generateInitialStudents } from './mockData';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
@@ -52,6 +52,7 @@ const LOCAL_STORAGE_KEYS = {
   EXAMS: 'school_grading_exams_v2',
   EXAM_RECORDS: 'school_grading_exam_records_v2',
   AUTH_SESSION: 'school_grading_auth_session_v2',
+  PROMOTIONS: 'school_grading_promotions_v2',
 };
 
 export const DEFAULT_FIREBASE_CONFIG: FirebaseCustomConfig = {
@@ -193,27 +194,7 @@ class StorageService {
 
   public tryInitFirebaseFromStorage(): boolean {
     try {
-      // 1. First priority: Check custom stored config in localStorage
-      const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
-      if (storedConfig) {
-        try {
-          const config: FirebaseCustomConfig = JSON.parse(storedConfig);
-          if (config.apiKey && config.projectId && !config.apiKey.includes('DummyKey')) {
-            const ok = this.initFirebase(config);
-            if (ok) return true;
-          }
-        } catch (e) {
-          // ignore parse error
-        }
-      }
-
-      // 2. Second priority: Default user configured project
-      if (DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey) {
-        const ok = this.initFirebase(DEFAULT_FIREBASE_CONFIG);
-        if (ok) return true;
-      }
-
-      // 3. Third priority: Check auto-provisioned Firebase applet config
+      // 1. First priority: Check auto-provisioned Firebase applet config
       if (firebaseAppletConfig && firebaseAppletConfig.apiKey && firebaseAppletConfig.projectId) {
         const autoConfig: FirebaseCustomConfig = {
           apiKey: firebaseAppletConfig.apiKey,
@@ -227,6 +208,26 @@ class StorageService {
         if (ok) {
           return true;
         }
+      }
+
+      // 2. Second priority: Check custom stored config in localStorage
+      const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEYS.FIREBASE_CONFIG);
+      if (storedConfig) {
+        try {
+          const config: FirebaseCustomConfig = JSON.parse(storedConfig);
+          if (config.apiKey && config.projectId && !config.apiKey.includes('DummyKey')) {
+            const ok = this.initFirebase(config);
+            if (ok) return true;
+          }
+        } catch (e) {
+          // ignore parse error
+        }
+      }
+
+      // 3. Third priority: Default user configured project
+      if (DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey) {
+        const ok = this.initFirebase(DEFAULT_FIREBASE_CONFIG);
+        if (ok) return true;
       }
     } catch (err) {
       console.warn('Could not initialize Firebase from storage:', err);
@@ -243,11 +244,25 @@ class StorageService {
       }
       
       const dbId = (firebaseAppletConfig as any)?.firestoreDatabaseId;
-      if (dbId && dbId !== '(default)') {
-        this.db = getFirestore(this.app, dbId);
-      } else {
-        this.db = getFirestore(this.app);
+      const firestoreSettings = {
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true,
+      };
+
+      try {
+        if (dbId && dbId !== '(default)') {
+          this.db = initializeFirestore(this.app, firestoreSettings, dbId);
+        } else {
+          this.db = initializeFirestore(this.app, firestoreSettings);
+        }
+      } catch {
+        if (dbId && dbId !== '(default)') {
+          this.db = getFirestore(this.app, dbId);
+        } else {
+          this.db = getFirestore(this.app);
+        }
       }
+
       try {
         const auth = getAuth(this.app);
         if (!auth.currentUser) {
@@ -516,12 +531,17 @@ class StorageService {
         },
       };
     } catch (err: any) {
+      const isUnavailable = err?.code === 'unavailable';
       const isPermError = err?.message?.includes('permission') || err?.message?.includes('Missing or insufficient') || err?.code === 'permission-denied';
-      const friendlyMsg = isPermError
+      const friendlyMsg = isUnavailable
+        ? 'ระบบกำลังทำงานในโหมดออฟไลน์ (Offline Mode) ข้อมูลถูกบันทึกและใช้งานในเครื่องได้อย่างสมบูรณ์'
+        : isPermError
         ? 'สิทธิ์ Firestore ใน Firebase Console ยังถูกล็อก (Missing or insufficient permissions) กรุณาเข้าไปเปิด Rules เป็น allow read, write: if true; แล้วกด Publish'
         : (err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Cloud Firestore');
 
-      console.warn('Firestore pull status:', friendlyMsg);
+      if (!isUnavailable) {
+        console.warn('Firestore pull status:', friendlyMsg);
+      }
       return {
         success: false,
         counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0 },
@@ -544,16 +564,30 @@ class StorageService {
 
     const unsubscribers: Unsubscribe[] = [];
 
+    const handleSyncError = (type: string, err: any) => {
+      // If code is 'unavailable', Firestore operates gracefully in offline mode
+      if (err?.code === 'unavailable') {
+        return;
+      }
+      console.warn(`${type} live sync warning:`, err);
+    };
+
     try {
       // 1. Listen to Students
       const unsubStudents = onSnapshot(collection(this.db!, 'students'), (snap) => {
         if (!snap.empty) {
           const list: Student[] = [];
-          snap.forEach((d) => list.push(d.data() as Student));
+          snap.forEach((d) => {
+            const st = d.data() as Student;
+            const g = (st.gradeLevel || '').trim();
+            if (!g.startsWith('ม.') && !g.startsWith('มัธยม')) {
+              list.push(st);
+            }
+          });
           localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(list));
           onUpdate('students');
         }
-      }, (err) => console.warn('Students live sync warning:', err));
+      }, (err) => handleSyncError('students', err));
       unsubscribers.push(unsubStudents);
 
       // 2. Listen to Subjects
@@ -564,7 +598,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.SUBJECTS, JSON.stringify(list));
           onUpdate('subjects');
         }
-      }, (err) => console.warn('Subjects live sync warning:', err));
+      }, (err) => handleSyncError('subjects', err));
       unsubscribers.push(unsubSubjects);
 
       // 3. Listen to Assignments
@@ -575,7 +609,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(list));
           onUpdate('assignments');
         }
-      }, (err) => console.warn('Assignments live sync warning:', err));
+      }, (err) => handleSyncError('assignments', err));
       unsubscribers.push(unsubAsgs);
 
       // 4. Listen to Scores
@@ -586,7 +620,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.SCORES, JSON.stringify(list));
           onUpdate('scores');
         }
-      }, (err) => console.warn('Scores live sync warning:', err));
+      }, (err) => handleSyncError('scores', err));
       unsubscribers.push(unsubScores);
 
       // 5. Listen to Attendance
@@ -597,7 +631,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(list));
           onUpdate('attendance');
         }
-      }, (err) => console.warn('Attendance live sync warning:', err));
+      }, (err) => handleSyncError('attendance', err));
       unsubscribers.push(unsubAttendance);
 
       // 6. Listen to Users
@@ -608,7 +642,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.USERS, JSON.stringify(list));
           onUpdate('users');
         }
-      }, (err) => console.warn('Users live sync warning:', err));
+      }, (err) => handleSyncError('users', err));
       unsubscribers.push(unsubUsers);
 
       // 7. Listen to Settings
@@ -621,7 +655,7 @@ class StorageService {
             }
           });
         }
-      }, (err) => console.warn('Settings live sync warning:', err));
+      }, (err) => handleSyncError('settings', err));
       unsubscribers.push(unsubSettings);
 
       // 8. Listen to Exams
@@ -632,7 +666,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.EXAMS, JSON.stringify(list));
           onUpdate('exams');
         }
-      }, (err) => console.warn('Exams live sync warning:', err));
+      }, (err) => handleSyncError('exams', err));
       unsubscribers.push(unsubExams);
 
       // 9. Listen to Exam Records
@@ -643,7 +677,7 @@ class StorageService {
           localStorage.setItem(LOCAL_STORAGE_KEYS.EXAM_RECORDS, JSON.stringify(list));
           onUpdate('exam_records');
         }
-      }, (err) => console.warn('Exam records live sync warning:', err));
+      }, (err) => handleSyncError('exam_records', err));
       unsubscribers.push(unsubExamRecords);
 
     } catch (e) {
@@ -742,12 +776,17 @@ class StorageService {
         },
       };
     } catch (err: any) {
+      const isUnavailable = err?.code === 'unavailable';
       const isPermError = err?.message?.includes('permission') || err?.message?.includes('Missing or insufficient') || err?.code === 'permission-denied';
-      const friendlyMsg = isPermError
+      const friendlyMsg = isUnavailable
+        ? 'ระบบกำลังทำงานในโหมดออฟไลน์ ข้อมูลถูกจัดเก็บอย่างปลอดภัยในเครื่อง และจะซิงก์เมื่อเชื่อมต่อเครือข่ายสำเร็จ'
+        : isPermError
         ? 'ไม่สามารถนำข้อมูลขึ้น Cloud ได้เนื่องจากติดสิทธิ์ (Missing or insufficient permissions) กรุณาเข้าไปเปิด Rules ใน Firebase Console ให้ allow read, write: if true; แล้วกด Publish'
         : (err?.message || 'เกิดข้อผิดพลาดในการนำข้อมูลขึ้น Firebase');
 
-      console.warn('Firestore sync status:', friendlyMsg);
+      if (!isUnavailable) {
+        console.warn('Firestore sync status:', friendlyMsg);
+      }
       return {
         success: false,
         counts: { students: 0, subjects: 0, assignments: 0, scores: 0, users: 0, attendance: 0, settings: 0 },
@@ -901,9 +940,35 @@ class StorageService {
   // --- STUDENTS ---
   public getStudents(): Student[] {
     const data = localStorage.getItem(LOCAL_STORAGE_KEYS.STUDENTS);
-    const students: Student[] = data ? JSON.parse(data) : [];
+    let students: Student[] = data ? JSON.parse(data) : [];
+    
+    // ตัด ม.1 - ม.6 ออก โดยให้คงเหลือเฉพาะระดับประถมศึกษา ป.1 - ป.6
+    const primaryStudents = students.filter((s) => {
+      const g = (s.gradeLevel || '').trim();
+      return !g.startsWith('ม.') && !g.startsWith('มัธยม');
+    });
+
+    if (primaryStudents.length !== students.length) {
+      if (primaryStudents.length === 0 && students.length > 0) {
+        // หากเดิมมีเฉพาะข้อมูล ม.1 - ม.6 เมื่อตัดออกหมด ให้สร้างข้อมูลตัวอย่างระดับประถม ป.1 - ป.6
+        const newPrimary = generateInitialStudents();
+        localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(newPrimary));
+        return newPrimary.sort((a, b) => a.studentNumber - b.studentNumber);
+      }
+      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(primaryStudents));
+      students = primaryStudents;
+    } else if (students.length === 0) {
+      const newPrimary = generateInitialStudents();
+      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(newPrimary));
+      return newPrimary.sort((a, b) => a.studentNumber - b.studentNumber);
+    }
+
     // เรียงลำดับจากเลขที่น้อยไปหามากตามความต้องการ
-    return students.sort((a, b) => a.studentNumber - b.studentNumber);
+    return primaryStudents.sort((a, b) => a.studentNumber - b.studentNumber);
+  }
+
+  public getStudentById(id: string): Student | undefined {
+    return this.getStudents().find((s) => s.id === id);
   }
 
   /**
@@ -1694,6 +1759,386 @@ class StorageService {
     }
 
     return updated;
+  }
+
+  // --- PROMOTION & ACADEMIC YEARS MANAGEMENT ---
+
+  public getPromotionHistory(): PromotionRecord[] {
+    const data = localStorage.getItem(LOCAL_STORAGE_KEYS.PROMOTIONS);
+    return data ? JSON.parse(data) : [];
+  }
+
+  public savePromotionRecord(record: PromotionRecord): void {
+    const records = this.getPromotionHistory();
+    const safeRecord: PromotionRecord = {
+      ...record,
+      id: sanitizeDocId(record.id),
+      timestamp: record.timestamp || new Date().toISOString(),
+    };
+    records.unshift(safeRecord);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.PROMOTIONS, JSON.stringify(records));
+
+    if (this.db && this.firebaseConnected) {
+      setDoc(doc(this.db, 'promotions', safeRecord.id), cleanForFirestore(safeRecord)).catch(console.error);
+    }
+  }
+
+  public deletePromotionRecord(recordId: string): void {
+    const safeId = sanitizeDocId(recordId);
+    const records = this.getPromotionHistory().filter((r) => r.id !== safeId && r.id !== recordId);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.PROMOTIONS, JSON.stringify(records));
+
+    if (this.db && this.firebaseConnected) {
+      deleteDoc(doc(this.db, 'promotions', safeId)).catch(console.error);
+    }
+  }
+
+  /**
+   * รวบรวมปีการศึกษาทั้งหมดที่มีอยู่ในระบบ ทั้งจากข้อมูลโรงเรียน, นักเรียน, รายวิชา, คะแนน, และประวัติการเลื่อนชั้น
+   * เรียงลำดับจากปีล่าสุดลงไป (เช่น 2569, 2568, 2567)
+   */
+  public getAvailableAcademicYears(): string[] {
+    const yearsSet = new Set<string>();
+    const currentYear = this.getSchoolSettings().academicYear || '2568';
+    yearsSet.add(currentYear);
+
+    // จากนักเรียน
+    this.getStudents().forEach((s) => {
+      if (s.academicYear) yearsSet.add(s.academicYear);
+      if (s.academicHistory) {
+        s.academicHistory.forEach((h) => {
+          if (h.academicYear) yearsSet.add(h.academicYear);
+        });
+      }
+    });
+
+    // จากรายวิชา
+    this.getSubjects().forEach((sub) => {
+      if (sub.academicYear) yearsSet.add(sub.academicYear);
+    });
+
+    // จากคะแนน
+    this.getScores().forEach((sc) => {
+      if (sc.academicYear) yearsSet.add(sc.academicYear);
+    });
+
+    // จากประวัติการเลื่อนชั้น
+    this.getPromotionHistory().forEach((p) => {
+      if (p.fromAcademicYear) yearsSet.add(p.fromAcademicYear);
+      if (p.toAcademicYear) yearsSet.add(p.toAcademicYear);
+    });
+
+    return Array.from(yearsSet).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numB - numA;
+      return b.localeCompare(a);
+    });
+  }
+
+  /**
+   * ดึงรายชื่อนักเรียนประจำปีการศึกษาที่ระบุ
+   * หากนักเรียนถูกเลื่อนชั้นไปปีถัดไปแล้ว จะฉายภาพ (Project) ข้อมูลระดับชั้นและห้องเรียนในอดีตจาก academicHistory
+   */
+  public getStudentsForAcademicYear(academicYear: string): Student[] {
+    const allStudents = this.getStudents();
+    const result: Student[] = [];
+
+    for (const student of allStudents) {
+      if (student.academicYear === academicYear) {
+        result.push(student);
+      } else if (student.academicHistory && student.academicHistory.length > 0) {
+        const historyRecord = student.academicHistory.find((h) => h.academicYear === academicYear);
+        if (historyRecord) {
+          result.push({
+            ...student,
+            gradeLevel: historyRecord.gradeLevel,
+            classroom: historyRecord.classroom,
+            classKey: historyRecord.classKey,
+            studentNumber: historyRecord.studentNumber || student.studentNumber,
+            academicYear: historyRecord.academicYear,
+            status: historyRecord.status || 'active',
+          });
+        }
+      }
+    }
+
+    return result
+      .filter((s) => {
+        const g = (s.gradeLevel || '').trim();
+        return !g.startsWith('ม.') && !g.startsWith('มัธยม');
+      })
+      .sort((a, b) => {
+        if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
+        return a.studentNumber - b.studentNumber;
+      });
+  }
+
+  /**
+   * ดึงประวัติผลการเรียนสะสมข้ามทุกปีการศึกษาของนักเรียน (ปพ.1 / ปพ.6)
+   */
+  public getStudentMultiYearTranscript(studentId: string) {
+    const student = this.getStudentById(studentId);
+    if (!student) return null;
+
+    const allScores = this.getScores().filter((s) => s.studentId === studentId);
+    const allSubjects = this.getSubjects();
+    const yearsSet = new Set<string>();
+
+    if (student.academicYear) yearsSet.add(student.academicYear);
+    student.academicHistory?.forEach((h) => yearsSet.add(h.academicYear));
+    allScores.forEach((sc) => yearsSet.add(sc.academicYear));
+
+    const sortedYears = Array.from(yearsSet).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numB - numA;
+      return b.localeCompare(a);
+    });
+
+    const yearlyData = sortedYears.map((year) => {
+      const isCurrentYear = student.academicYear === year;
+      const historyItem = student.academicHistory?.find((h) => h.academicYear === year);
+
+      const gradeLevel = isCurrentYear ? student.gradeLevel : (historyItem?.gradeLevel || '-');
+      const classKey = isCurrentYear ? student.classKey : (historyItem?.classKey || '-');
+      const studentNumber = isCurrentYear ? student.studentNumber : (historyItem?.studentNumber || student.studentNumber);
+
+      const yearScores = allScores.filter((sc) => sc.academicYear === year);
+      const subjectRecords = yearScores.map((sc) => {
+        const subject = allSubjects.find((sub) => sub.id === sc.subjectId);
+        return {
+          score: sc,
+          subject: subject || {
+            id: sc.subjectId,
+            code: 'N/A',
+            name: 'ไม่พบข้อมูลวิชา',
+            credits: 1.0,
+            gradeLevel,
+            targetClasses: [classKey],
+            academicYear: year,
+            teacherId: '',
+            teacherName: '-',
+          },
+        };
+      });
+
+      let totalCredits = 0;
+      let totalGradePoints = 0;
+      let passedCount = 0;
+
+      subjectRecords.forEach((item) => {
+        const credits = item.subject.credits || 1.0;
+        const grade = item.score.finalCombined?.finalGrade ?? 0;
+        totalCredits += credits;
+        totalGradePoints += (credits * grade);
+        if (grade >= 1) passedCount++;
+      });
+
+      const yearGpa = totalCredits > 0 ? (totalGradePoints / totalCredits) : (historyItem?.gpa || 0);
+
+      return {
+        academicYear: year,
+        gradeLevel,
+        classKey,
+        studentNumber,
+        status: historyItem?.status || (isCurrentYear ? student.status : 'active'),
+        promotedAt: historyItem?.promotedAt,
+        promotedBy: historyItem?.promotedBy,
+        subjects: subjectRecords,
+        totalCredits,
+        passedCount,
+        failedCount: subjectRecords.length - passedCount,
+        gpa: parseFloat(yearGpa.toFixed(2)),
+      };
+    });
+
+    let grandTotalCredits = 0;
+    let grandTotalGradePoints = 0;
+    yearlyData.forEach((yd) => {
+      yd.subjects.forEach((item) => {
+        const credits = item.subject.credits || 1.0;
+        const grade = item.score.finalCombined?.finalGrade ?? 0;
+        grandTotalCredits += credits;
+        grandTotalGradePoints += (credits * grade);
+      });
+    });
+
+    const gpax = grandTotalCredits > 0 ? parseFloat((grandTotalGradePoints / grandTotalCredits).toFixed(2)) : 0;
+
+    return {
+      student,
+      gpax,
+      totalCreditsAccumulated: grandTotalCredits,
+      yearlyData,
+    };
+  }
+
+  /**
+   * ดำเนินการเลื่อนชั้นเรียน (Grade Promotion Execution)
+   * 1. บันทึกประวัติชั้นเดิมลงใน academicHistory ของนักเรียนแต่ละคน
+   * 2. อัปเดตข้อมูลระดับชั้น, ห้อง, เลขที่, ปีการศึกษาใหม่
+   * 3. รักษารายการคะแนนและใบงานของปีที่ผ่านมาทั้งหมดไว้โดยไม่ถูกลบ
+   * 4. คัดลอกรายวิชาพื้นฐานไปยังปีการศึกษาใหม่ (หากเลือก)
+   * 5. บันทึก PromotionRecord ลงในประวัติ
+   * 6. อัปเดตปีการศึกษาของสถานศึกษา (หากเลือก)
+   */
+  public async executeStudentPromotion(params: {
+    fromAcademicYear: string;
+    toAcademicYear: string;
+    sourceGradeLevel?: string;
+    sourceClassKey?: string;
+    students: {
+      studentId: string;
+      studentCode: string;
+      name: string;
+      action: 'promote' | 'repeat' | 'graduated' | 'transferred';
+      targetGradeLevel: string;
+      targetClassKey: string;
+      targetStudentNumber: number;
+      gpa?: number;
+      passedAll?: boolean;
+    }[];
+    copySubjectsToNewYear?: boolean;
+    setAsCurrentAcademicYear?: boolean;
+    executedBy: string;
+    note?: string;
+  }): Promise<{ success: boolean; message: string; record: PromotionRecord }> {
+    const allStudents = this.getStudents();
+    const studentsMap = new Map<string, Student>(allStudents.map((s) => [s.id, { ...s }]));
+
+    let promotedCount = 0;
+    let repeatedCount = 0;
+    let graduatedCount = 0;
+    let transferredCount = 0;
+
+    const promotionDetails = [];
+
+    for (const item of params.students) {
+      const student = studentsMap.get(item.studentId);
+      if (!student) continue;
+
+      const previousHistory: StudentAcademicHistory = {
+        academicYear: student.academicYear || params.fromAcademicYear,
+        gradeLevel: student.gradeLevel,
+        classroom: student.classroom,
+        classKey: student.classKey,
+        studentNumber: student.studentNumber,
+        status: item.action === 'promote' ? 'active' : item.action === 'repeat' ? 'repeated' : item.action,
+        promotedAt: new Date().toISOString(),
+        promotedBy: params.executedBy,
+        gpa: item.gpa,
+        remark: item.action === 'promote' 
+          ? `เลื่อนชั้นจาก ${student.classKey} ไปยัง ${item.targetClassKey} ประจำปีการศึกษา ${params.toAcademicYear}`
+          : item.action === 'repeat'
+          ? `ซ้ำชั้นใน ${student.classKey} ประจำปีการศึกษา ${params.toAcademicYear}`
+          : item.action === 'graduated'
+          ? `สำเร็จการศึกษา ประจำปีการศึกษา ${params.fromAcademicYear}`
+          : `ย้ายสถานศึกษา`,
+      };
+
+      const existingHistory = student.academicHistory || [];
+      const filteredHistory = existingHistory.filter((h) => h.academicYear !== previousHistory.academicYear);
+      student.academicHistory = [...filteredHistory, previousHistory];
+
+      if (item.action === 'promote') {
+        student.academicYear = params.toAcademicYear;
+        student.gradeLevel = item.targetGradeLevel;
+        student.classroom = item.targetClassKey.includes('/') ? item.targetClassKey.split('/')[1] : '1';
+        student.classKey = item.targetClassKey;
+        student.studentNumber = item.targetStudentNumber;
+        student.status = 'active';
+        promotedCount++;
+      } else if (item.action === 'repeat') {
+        student.academicYear = params.toAcademicYear;
+        student.studentNumber = item.targetStudentNumber;
+        student.status = 'active';
+        repeatedCount++;
+      } else if (item.action === 'graduated') {
+        student.academicYear = params.toAcademicYear;
+        student.status = 'graduated';
+        graduatedCount++;
+      } else if (item.action === 'transferred') {
+        student.status = 'transferred';
+        transferredCount++;
+      }
+
+      promotionDetails.push({
+        studentId: student.id,
+        studentCode: student.studentCode,
+        name: `${student.prefix}${student.firstName} ${student.lastName}`,
+        fromGradeLevel: previousHistory.gradeLevel,
+        fromClassKey: previousHistory.classKey,
+        fromStudentNumber: previousHistory.studentNumber,
+        toGradeLevel: student.gradeLevel,
+        toClassKey: student.classKey,
+        toStudentNumber: student.studentNumber,
+        action: item.action,
+        gpa: item.gpa,
+        passedAll: item.passedAll,
+      });
+
+      studentsMap.set(student.id, student);
+    }
+
+    const updatedStudentsList = Array.from(studentsMap.values());
+    this.bulkSaveStudents(updatedStudentsList);
+
+    // คัดลอกรายวิชาพื้นฐานไปยังปีการศึกษาใหม่
+    let copiedSubjectsCount = 0;
+    if (params.copySubjectsToNewYear) {
+      const allSubjects = this.getSubjects();
+      const existingNewYearSubjects = allSubjects.filter((s) => s.academicYear === params.toAcademicYear);
+      const sourceSubjects = allSubjects.filter((s) => s.academicYear === params.fromAcademicYear);
+
+      for (const srcSub of sourceSubjects) {
+        const alreadyExists = existingNewYearSubjects.some(
+          (s) => s.code === srcSub.code && s.name === srcSub.name
+        );
+        if (!alreadyExists) {
+          const newSubId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const clonedSubject: Subject = {
+            ...srcSub,
+            id: newSubId,
+            academicYear: params.toAcademicYear,
+          };
+          this.saveSubject(clonedSubject);
+          copiedSubjectsCount++;
+        }
+      }
+    }
+
+    if (params.setAsCurrentAcademicYear) {
+      this.saveSchoolSettings({
+        academicYear: params.toAcademicYear,
+      });
+    }
+
+    const record: PromotionRecord = {
+      id: `promo_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      executedBy: params.executedBy,
+      fromAcademicYear: params.fromAcademicYear,
+      toAcademicYear: params.toAcademicYear,
+      sourceGradeLevel: params.sourceGradeLevel,
+      sourceClassKey: params.sourceClassKey,
+      totalStudents: params.students.length,
+      promotedCount,
+      repeatedCount,
+      graduatedCount,
+      transferredCount,
+      studentsDetail: promotionDetails,
+      copiedSubjectsCount,
+      note: params.note,
+    };
+
+    this.savePromotionRecord(record);
+
+    return {
+      success: true,
+      message: `ดำเนินการเลื่อนชั้นเรียนสำเร็จ: เลื่อนชั้น ${promotedCount} คน, ซ้ำชั้น ${repeatedCount} คน, สำเร็จการศึกษา ${graduatedCount} คน`,
+      record,
+    };
   }
 }
 

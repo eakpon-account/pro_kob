@@ -31,14 +31,16 @@ import {
   Keyboard,
   Smartphone,
   Monitor,
-  Target
+  Target,
+  Sliders
 } from 'lucide-react';
 import { 
   Assignment, 
   AssignmentCategory, 
   Student, 
   StudentSubjectScore, 
-  Subject 
+  Subject,
+  SubjectGradingRatio
 } from '../types';
 import { 
   computeFinalCombinedScore, 
@@ -49,7 +51,8 @@ import {
   getAssignmentSummaryText,
   getFormattedStandardText,
   getDisplayTopic,
-  formatStrandDisplay
+  formatStrandDisplay,
+  getSubjectRatio
 } from '../utils/grading';
 import { storage } from '../services/storage';
 import { exportGradeReportExcel } from '../utils/excelHelper';
@@ -69,6 +72,7 @@ interface ScoreGradingProps {
   preselectedClassKey?: string;
   initialSubjectId?: string;
   initialClassKey?: string;
+  onNavigateToRatios?: (subjectId?: string) => void;
 }
 
 export const ScoreGrading: React.FC<ScoreGradingProps> = ({
@@ -84,6 +88,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
   preselectedClassKey,
   initialSubjectId,
   initialClassKey,
+  onNavigateToRatios,
 }) => {
   // Navigation & Selection States
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
@@ -101,7 +106,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
   }, [selectedSubject]);
 
   const [selectedClassKey, setSelectedClassKey] = useState<string>(
-    preselectedClassKey || initialClassKey || (availableClasses.length > 0 ? availableClasses[0] : 'ม.1/1')
+    preselectedClassKey || initialClassKey || (availableClasses.length > 0 ? availableClasses[0] : 'ป.1/1')
   );
 
   // Sync selectedSubjectId and selectedClassKey when initial props change
@@ -129,9 +134,14 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isAssignmentsCollapsed, setIsAssignmentsCollapsed] = useState(false);
 
-  // คะแนนเก็บทั้งหมด แทนคะแนนเต็ม 100
-  const s1TargetScore = selectedSubject?.semester1TargetScore ?? 100;
-  const s2TargetScore = selectedSubject?.semester2TargetScore ?? 100;
+  // สัดส่วนคะแนนที่อ้างอิงจากเมนูสัดส่วนคะแนนเป็นหลัก
+  const resolvedRatioS1 = useMemo(() => getSubjectRatio(selectedSubject, 1), [selectedSubject]);
+  const resolvedRatioS2 = useMemo(() => getSubjectRatio(selectedSubject, 2), [selectedSubject]);
+  const currentRatio = activeSemesterTab === 2 ? resolvedRatioS2 : resolvedRatioS1;
+
+  // คะแนนเก็บใบงานทั้งหมด (อ้างอิงจาก courseworkWeight ตามสัดส่วนคะแนนเป็นหลัก)
+  const s1TargetScore = resolvedRatioS1.courseworkWeight;
+  const s2TargetScore = resolvedRatioS2.courseworkWeight;
   const currentTargetScore = activeSemesterTab === 2 ? s2TargetScore : s1TargetScore;
 
   const [targetScoreInput, setTargetScoreInput] = useState<string>(String(currentTargetScore));
@@ -264,11 +274,21 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
     if (!selectedSubject) return;
 
     const targetSem = activeSemesterTab === 2 ? 2 : 1;
-    const oldTarget = targetSem === 2 ? (selectedSubject.semester2TargetScore ?? 100) : (selectedSubject.semester1TargetScore ?? 100);
+    const curRatio = getSubjectRatio(selectedSubject, targetSem);
+    const updatedRatio: SubjectGradingRatio = {
+      courseworkWeight: numVal,
+      midtermWeight: curRatio.midtermWeight,
+      finalExamWeight: curRatio.finalExamWeight,
+      totalTargetScore: numVal + curRatio.midtermWeight + curRatio.finalExamWeight,
+      ratioPreset: 'custom',
+      updatedAt: new Date().toISOString(),
+    };
 
     const updatedSubject: Subject = {
       ...selectedSubject,
-      ...(targetSem === 1 ? { semester1TargetScore: numVal } : { semester2TargetScore: numVal }),
+      ...(targetSem === 1 
+        ? { semester1TargetScore: numVal, ratioSemester1: updatedRatio } 
+        : { semester2TargetScore: numVal, ratioSemester2: updatedRatio }),
     };
 
     // 1. Save subject to storage and propagate to parent
@@ -821,54 +841,10 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
 
           </div>
 
-          {/* Target Score Config & Add Assignment (visible in Term 1 & 2) */}
-          {activeSemesterTab !== 'combined' ? (
+          {/* Add Assignment & Total Max Score info (visible in Term 1 & 2) */}
+          {activeSemesterTab !== 'combined' && (
             <div className="flex flex-wrap items-center gap-2.5">
-              {/* ช่อง คะแนนเก็บทั้งหมด คะแนน เพื่อใช้สำหรับ แทนคะแนนเต็ม 100 */}
-              <div 
-                id="box-target-score-config"
-                className="flex items-center gap-2 bg-emerald-50 text-emerald-950 px-3 py-1.5 rounded-xl border border-emerald-300/80 shadow-2xs"
-                title="กำหนดคะแนนเก็บทั้งหมดสำหรับภาคเรียนนี้ เพื่อใช้คำนวณคะแนนรวมแทนคะแนนเต็ม 100"
-              >
-                <label htmlFor="input-target-score" className="text-xs font-bold whitespace-nowrap text-emerald-900 flex items-center gap-1">
-                  <Target className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>คะแนนเก็บทั้งหมด</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <input
-                    id="input-target-score"
-                    type="number"
-                    min="1"
-                    max="1000"
-                    step="1"
-                    value={targetScoreInput}
-                    onChange={(e) => setTargetScoreInput(e.target.value)}
-                    onBlur={handleSaveTargetScore}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        (e.target as HTMLInputElement).blur();
-                      }
-                    }}
-                    className="w-16 px-2 py-0.5 text-xs font-black text-center text-emerald-950 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                    placeholder="100"
-                  />
-                  <span className="text-xs font-bold text-emerald-900">คะแนน</span>
-                </div>
-                <button
-                  type="button"
-                  id="btn-save-target-score"
-                  onClick={handleSaveTargetScore}
-                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-[11px] font-bold transition-colors cursor-pointer shadow-2xs"
-                  title="บันทึกคะแนนเก็บทั้งหมด"
-                >
-                  บันทึก
-                </button>
-                <span className="text-[10px] text-emerald-700 font-semibold hidden lg:inline">
-                  (แทนเต็ม 100)
-                </span>
-              </div>
-
-              <span className="text-[11px] text-slate-500 font-medium hidden xl:inline">
+              <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
                 คะแนนเต็มรวมใบงาน: <strong className="text-emerald-700 font-bold">{currentSemesterTotalMaxScore}</strong> คะแนน
               </span>
 
@@ -880,16 +856,6 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                 <Plus className="w-3.5 h-3.5" />
                 <span>เพิ่มช่องคะแนน / ชิ้นงาน</span>
               </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-slate-500 font-medium">คะแนนเก็บเต็ม:</span>
-              <span className="bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 font-bold text-slate-700">
-                เทอม 1: <strong className="text-emerald-700">{s1TargetScore}</strong> คะแนน
-              </span>
-              <span className="bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 font-bold text-slate-700">
-                เทอม 2: <strong className="text-emerald-700">{s2TargetScore}</strong> คะแนน
-              </span>
             </div>
           )}
         </div>
@@ -1168,14 +1134,14 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                       </span>
                     </th>
 
-                    {/* Scaled Score to Target Score (คะแนนเก็บทั้งหมด แทนคะแนนเต็ม 100) */}
+                    {/* Scaled Score to Target Score */}
                     <th className="py-2.5 px-3 min-w-[130px] text-center border-r border-slate-200 bg-emerald-100/70 font-bold text-slate-900">
-                      <div>คะแนนเก็บทั้งหมด</div>
+                      <div>1. คะแนนเก็บใบงาน/ภาระงาน</div>
                       <div className="text-[10px] font-extrabold text-emerald-950">
                         เต็ม {currentTargetScore} คะแนน
                       </div>
                       <span className="text-[9px] font-medium text-emerald-800 block">
-                        (ดิบ ÷ {currentSemesterTotalMaxScore || currentTargetScore}) × {currentTargetScore}
+                        (สัดส่วน {currentTargetScore}% จาก 100)
                       </span>
                     </th>
 
@@ -1834,7 +1800,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="เช่น ป.1/1 หรือ ม.3/2 หรือ 1"
+                    placeholder="เช่น ป.1/1 หรือ ป.2/1 หรือ 1"
                     value={newAsgIndicator}
                     onChange={(e) => setNewAsgIndicator(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none placeholder:text-slate-400"
@@ -2026,7 +1992,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="เช่น ป.1/1 หรือ ม.3/2 หรือ 1"
+                    placeholder="เช่น ป.1/1 หรือ ป.2/1 หรือ 1"
                     value={editAsgIndicator}
                     onChange={(e) => setEditAsgIndicator(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none placeholder:text-slate-400"

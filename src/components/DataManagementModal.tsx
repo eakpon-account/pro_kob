@@ -205,7 +205,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     setStatusMessage({
       type: 'success',
       text: 'รีเซ็ตข้อมูลเป็นชุดตัวอย่างเรียบร้อยแล้ว',
-      subText: 'โหลดข้อมูลนักเรียนชั้น ม.1 - ม.3 และคะแนนตัวอย่างสำหรับการประเมินผลเรียบร้อย',
+      subText: 'โหลดข้อมูลนักเรียนชั้น ป.1 - ป.6 และคะแนนตัวอย่างสำหรับการประเมินผลเรียบร้อย',
     });
   };
 
@@ -473,7 +473,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
               <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-amber-900">รีเซ็ตเป็นข้อมูลตัวอย่าง (Demo Data)</h4>
-                  <p className="text-[11px] text-amber-800">สร้างข้อมูลนักเรียน ม.1 - ม.3 และคะแนนสมจริงสำหรับทดสอบระบบ</p>
+                  <p className="text-[11px] text-amber-800">สร้างข้อมูลนักเรียน ป.1 - ป.6 และคะแนนสมจริงสำหรับทดสอบระบบ</p>
                 </div>
                 <button
                   onClick={handleRequestResetToDemo}
@@ -755,8 +755,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
         <ConfirmDeleteModal
           isOpen={showDemoResetConfirm}
           title="ยืนยันการรีเซ็ตเป็นชุดข้อมูลตัวอย่าง"
-          itemTitle="ชุดข้อมูลโรงเรียนตัวอย่าง (ระดับชั้น ม.1 - ม.3)"
-          itemSubtitle="ประกอบด้วยข้อมูลนักเรียน 9 ห้องเรียน, 3 รายวิชาหลัก, ใบงาน และคะแนนสำหรับทดสอบระบบ"
+          itemTitle="ชุดข้อมูลโรงเรียนตัวอย่าง (ระดับชั้น ป.1 - ป.6)"
+          itemSubtitle="ประกอบด้วยข้อมูลนักเรียน 6 ระดับชั้น, รายวิชาหลัก, ใบงาน และคะแนนสำหรับทดสอบระบบ"
           warningMessage="ข้อมูลนักเรียนและคะแนนปัจจุบันทั้งหมดจะถูกแทนที่ด้วยชุดข้อมูลสาธิต เพื่อการทดลองใช้งานระบบ"
           confirmLabel="ยืนยันรีเซ็ตข้อมูลตัวอย่าง"
           cancelLabel="ยกเลิก"

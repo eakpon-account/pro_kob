@@ -1,4 +1,116 @@
-import { Assignment, AssignmentCategory, SemesterScoreData } from '../types';
+import { Assignment, AssignmentCategory, SemesterScoreData, Subject, SubjectGradingRatio } from '../types';
+
+export interface ResolvedSubjectRatio {
+  courseworkWeight: number; // 1. คะแนนเก็บใบงาน/ภาระงาน เช่น 70
+  examWeight: number;       // 2. คะแนนสอบ (เมื่อแบ่งคะแนนเก็บจากใบงานแล้ว ที่เหลือคือคะแนนสอบ) เช่น 30
+  midtermWeight: number;    // คะแนนสอบกลางภาค (ย่อยจากคะแนนสอบ)
+  finalExamWeight: number;  // คะแนนสอบปลายภาค (ย่อยจากคะแนนสอบ)
+  totalTargetScore: number; // คะแนนรวมเต็มเป้าหมาย เช่น 100
+  presetName: string;
+}
+
+/**
+ * ดึงสัดส่วนคะแนนของรายวิชาตามภาคเรียนที่ระบุ (ภาคเรียนที่ 1 หรือ 2)
+ * แบ่งออกเป็น 2 ส่วนหลัก:
+ * 1. คะแนนเก็บใบงาน/ภาระงาน
+ * 2. คะแนนสอบ (เมื่อแบ่งคะแนนเก็บจากใบงานแล้ว ที่เหลือคือคะแนนสอบ)
+ * ค่ามาตรฐาน 70:30 (คะแนนเก็บใบงาน 70 : คะแนนสอบ 30 = รวม 100)
+ */
+export function getSubjectRatio(
+  subject?: Subject,
+  semester: 1 | 2 = 1
+): ResolvedSubjectRatio {
+  if (!subject) {
+    return {
+      courseworkWeight: 70,
+      examWeight: 30,
+      midtermWeight: 10,
+      finalExamWeight: 20,
+      totalTargetScore: 100,
+      presetName: '70:30',
+    };
+  }
+
+  const ratio = semester === 2 ? subject.ratioSemester2 : subject.ratioSemester1;
+  const legacyTarget = semester === 2 ? subject.semester2TargetScore : subject.semester1TargetScore;
+
+  let total = Number(ratio?.totalTargetScore) || 100;
+  let cw: number;
+  let exam: number;
+
+  if (ratio?.examWeight !== undefined && ratio?.courseworkWeight !== undefined) {
+    cw = Number(ratio.courseworkWeight);
+    exam = Number(ratio.examWeight);
+  } else if (ratio?.ratioPreset === '70:30') {
+    cw = 70;
+    exam = 30;
+  } else if (ratio?.ratioPreset === '80:20') {
+    cw = 80;
+    exam = 20;
+  } else if (ratio?.ratioPreset === '60:40') {
+    cw = 60;
+    exam = 40;
+  } else if (ratio?.ratioPreset === '50:50') {
+    cw = 50;
+    exam = 50;
+  } else if (ratio?.courseworkWeight !== undefined) {
+    cw = Number(ratio.courseworkWeight);
+    // เมื่อแบ่งคะแนนเก็บจากใบงานแล้ว ที่เหลือคือคะแนนสอบ
+    exam = Math.max(0, total - cw);
+  } else if (legacyTarget !== undefined && legacyTarget > 0 && legacyTarget <= 100) {
+    cw = legacyTarget;
+    exam = Math.max(0, total - cw);
+  } else {
+    // ค่าเริ่มต้นสัดส่วน 70 : 30
+    cw = 70;
+    exam = 30;
+  }
+
+  // ซิงก์คะแนนสอบย่อย (กลางภาค / ปลายภาค) ให้ผลรวมเท่ากับคะแนนสอบ (exam) พอดี
+  let mid = ratio?.midtermWeight;
+  let fin = ratio?.finalExamWeight;
+
+  if (mid !== undefined && fin !== undefined && mid + fin === exam) {
+    // สอดคล้องกับคะแนนสอบพอดี
+  } else if (fin !== undefined && fin <= exam) {
+    mid = Math.max(0, exam - fin);
+  } else if (mid !== undefined && mid <= exam) {
+    fin = Math.max(0, exam - mid);
+  } else {
+    // แบ่งกลางภาคและปลายภาค เช่น 10:20 หรือแบ่งครึ่ง
+    if (exam === 30) {
+      mid = 10;
+      fin = 20;
+    } else if (exam === 20) {
+      mid = 10;
+      fin = 10;
+    } else if (exam === 40) {
+      mid = 20;
+      fin = 20;
+    } else {
+      mid = Math.round(exam / 2);
+      fin = Math.max(0, exam - mid);
+    }
+  }
+
+  let preset = ratio?.ratioPreset;
+  if (!preset) {
+    if (cw === 70 && exam === 30) preset = '70:30';
+    else if (cw === 80 && exam === 20) preset = '80:20';
+    else if (cw === 60 && exam === 40) preset = '60:40';
+    else if (cw === 50 && exam === 50) preset = '50:50';
+    else preset = 'custom';
+  }
+
+  return {
+    courseworkWeight: Math.max(0, cw),
+    examWeight: Math.max(0, exam),
+    midtermWeight: Math.max(0, mid ?? 0),
+    finalExamWeight: Math.max(0, fin ?? 0),
+    totalTargetScore: Math.max(1, total),
+    presetName: preset,
+  };
+}
 
 /**
  * ตัดเกรดตามเกณฑ์มาตรฐาน 8 ระดับ (0, 1, 1.5, 2, 2.5, 3, 3.5, 4):

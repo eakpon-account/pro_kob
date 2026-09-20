@@ -399,7 +399,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
     setStatusMessage({
       type: 'success',
       text: 'รีเซ็ตข้อมูลเป็นชุดสาธิตตั้งต้นเรียบร้อยแล้ว',
-      subText: 'โหลดข้อมูลนักเรียนชั้น ม.1 - ม.3 และคะแนนตัวอย่างสำหรับการประเมินผลเรียบร้อย',
+      subText: 'โหลดข้อมูลนักเรียนชั้น ป.1 - ป.6 และคะแนนตัวอย่างสำหรับการประเมินผลเรียบร้อย',
     });
     setTimeout(() => setStatusMessage(null), 4000);
   };
@@ -940,7 +940,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
             <div>
               <h4 className="text-xs font-bold text-purple-900">โหลดชุดข้อมูลตัวอย่างสาธิต (Demo Template)</h4>
               <p className="text-[11px] text-purple-700 mt-0.5">
-                โหลดตัวอย่างรายชื่อนักเรียนชั้น ม.1 - ม.3 และคะแนนตัวอย่างเพื่อทดสอบการทำงานของระบบ
+                โหลดตัวอย่างรายชื่อนักเรียนชั้น ป.1 - ป.6 และคะแนนตัวอย่างเพื่อทดสอบการทำงานของระบบ
               </p>
             </div>
             <button
@@ -1182,7 +1182,7 @@ export const SystemSettings: React.FC<SystemSettingsProps> = ({
         <ConfirmDeleteModal
           isOpen={showDemoResetConfirm}
           title="ยืนยันการโหลดชุดข้อมูลตัวอย่างสาธิต"
-          description="การดำเนินการนี้จะโหลดชุดข้อมูลตัวอย่างนักเรียน ม.1 - ม.3 และคะแนนจำลองแทนที่ข้อมูลปัจจุบัน คุณต้องการดำเนินการต่อหรือไม่?"
+          description="การดำเนินการนี้จะโหลดชุดข้อมูลตัวอย่างนักเรียน ป.1 - ป.6 และคะแนนจำลองแทนที่ข้อมูลปัจจุบัน คุณต้องการดำเนินการต่อหรือไม่?"
           confirmText="โหลดข้อมูลตัวอย่าง"
           onConfirm={handleConfirmResetToDemo}
           onClose={() => setShowDemoResetConfirm(false)}

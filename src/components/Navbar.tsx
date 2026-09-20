@@ -29,14 +29,15 @@ import {
   School,
   AlertTriangle,
   CalendarCheck,
-  ClipboardCheck
+  ClipboardCheck,
+  Sliders
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { storage } from '../services/storage';
 import { ROLE_CONFIGS } from './UserManagement';
 import { SettingsTabId } from './SystemSettings';
 
-export type MainTabType = 'dashboard' | 'attendance' | 'grading' | 'exams' | 'cut_grade' | 'students' | 'subjects' | 'settings' | 'users';
+export type MainTabType = 'dashboard' | 'attendance' | 'ratios' | 'grading' | 'exams' | 'cut_grade' | 'students' | 'promotion' | 'subjects' | 'settings' | 'users';
 
 interface SidebarProps {
   currentTab: MainTabType;
@@ -238,6 +239,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </button>
 
+          {/* Subjects */}
+          <button
+            id="nav-tab-subjects"
+            onClick={() => handleNavClick('subjects')}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
+              currentTab === 'subjects'
+                ? 'bg-emerald-50 text-emerald-700 font-semibold border border-emerald-100 shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
+            }`}
+          >
+            <BookOpen className={`w-4 h-4 ${currentTab === 'subjects' ? 'text-emerald-600' : 'text-slate-400'}`} />
+            <span>รายวิชาและสัดส่วนคะแนน</span>
+          </button>
+
+          {/* Score Ratios (สัดส่วนคะแนน แยกตามแต่ละวิชาและภาคเรียน) */}
+          <button
+            id="nav-tab-ratios"
+            onClick={() => handleNavClick('ratios')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
+              currentTab === 'ratios'
+                ? 'bg-amber-50 text-amber-900 font-bold border border-amber-300 shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Sliders className={`w-4 h-4 ${currentTab === 'ratios' ? 'text-amber-600' : 'text-slate-400'}`} />
+              <span>สัดส่วนคะแนน</span>
+            </div>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+              currentTab === 'ratios'
+                ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                : 'bg-amber-50/80 text-amber-700 border border-amber-200/60'
+            }`}>
+              แยกวิชา/ภาค
+            </span>
+          </button>
+
           {/* Students */}
           <button
             id="nav-tab-students"
@@ -252,18 +290,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>ทะเบียนรายชื่อนักเรียน</span>
           </button>
 
-          {/* Subjects */}
+          {/* Student Grade Promotion (ระบบเลื่อนชั้นเรียน) */}
           <button
-            id="nav-tab-subjects"
-            onClick={() => handleNavClick('subjects')}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
-              currentTab === 'subjects'
-                ? 'bg-emerald-50 text-emerald-700 font-semibold border border-emerald-100 shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
+            id="nav-tab-promotion"
+            onClick={() => handleNavClick('promotion')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl font-medium text-xs transition-colors text-left ${
+              currentTab === 'promotion'
+                ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200 shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
             }`}
           >
-            <BookOpen className={`w-4 h-4 ${currentTab === 'subjects' ? 'text-emerald-600' : 'text-slate-400'}`} />
-            <span>รายวิชาและสัดส่วนคะแนน</span>
+            <div className="flex items-center gap-3">
+              <GraduationCap className={`w-4 h-4 ${currentTab === 'promotion' ? 'text-purple-600' : 'text-slate-400'}`} />
+              <span>เลื่อนชั้นเรียน</span>
+            </div>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+              currentTab === 'promotion'
+                ? 'bg-purple-200 text-purple-900'
+                : 'bg-purple-50 text-purple-700 border border-purple-200'
+            }`}>
+              ประจำปี
+            </span>
           </button>
 
           {/* Unified System Settings Tab with Consolidated Sub-menu */}

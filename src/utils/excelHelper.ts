@@ -6,33 +6,33 @@ export function downloadStudentTemplate() {
   const sampleData = [
     {
       'เลขที่': 1,
-      'รหัสนักเรียน': '68001',
+      'รหัสนักเรียน': '68101',
       'คำนำหน้า': 'ด.ช.',
       'ชื่อ': 'กิตติศักดิ์',
       'นามสกุล': 'รัตนโชติ',
-      'ระดับชั้น': 'ม.1',
+      'ระดับชั้น': 'ป.1',
       'ห้อง': '1',
       'เพศ (M/F)': 'M',
       'เบอร์โทร': '0812345678',
     },
     {
       'เลขที่': 2,
-      'รหัสนักเรียน': '68002',
+      'รหัสนักเรียน': '68102',
       'คำนำหน้า': 'ด.ญ.',
       'ชื่อ': 'กานดา',
       'นามสกุล': 'วงษ์สุวรรณ',
-      'ระดับชั้น': 'ม.1',
+      'ระดับชั้น': 'ป.1',
       'ห้อง': '1',
       'เพศ (M/F)': 'F',
       'เบอร์โทร': '0898765432',
     },
     {
       'เลขที่': 3,
-      'รหัสนักเรียน': '68003',
+      'รหัสนักเรียน': '68103',
       'คำนำหน้า': 'ด.ช.',
       'ชื่อ': 'ชินดนัย',
       'นามสกุล': 'ศิริโรจน์',
-      'ระดับชั้น': 'ม.1',
+      'ระดับชั้น': 'ป.1',
       'ห้อง': '1',
       'เพศ (M/F)': 'M',
       'เบอร์โทร': '0845678901',
@@ -67,7 +67,7 @@ export function parseStudentsFromExcel(file: File): Promise<{ students: Student[
           const prefix = String(row['คำนำหน้า'] || row['Prefix'] || 'ด.ช.');
           const firstName = String(row['ชื่อ'] || row['FirstName'] || row['name'] || '').trim();
           const lastName = String(row['นามสกุล'] || row['LastName'] || '').trim();
-          const gradeLevel = String(row['ระดับชั้น'] || row['Grade'] || 'ม.1').trim();
+          const gradeLevel = String(row['ระดับชั้น'] || row['Grade'] || 'ป.1').trim();
           const classroom = String(row['ห้อง'] || row['Room'] || '1').trim();
           const genderInput = String(row['เพศ (M/F)'] || row['เพศ'] || row['Gender'] || 'M').toUpperCase();
           const gender = genderInput.startsWith('F') || genderInput.includes('ญ') ? 'F' : 'M';

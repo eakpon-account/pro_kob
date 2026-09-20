@@ -32,9 +32,10 @@ import {
   User, 
   Exam, 
   ExamRecord, 
-  SemesterScoreData 
+  SemesterScoreData,
+  SubjectGradingRatio
 } from '../types';
-import { calculateGrade, getGradeLabel } from '../utils/grading';
+import { calculateGrade, getGradeLabel, getSubjectRatio } from '../utils/grading';
 import { storage } from '../services/storage';
 import * as XLSX from 'xlsx';
 
@@ -49,6 +50,7 @@ interface GradeCalculationProps {
   initialSubjectId?: string;
   initialClassKey?: string;
   onNavigateToSubjects?: () => void;
+  onNavigateToRatios?: (subjectId?: string) => void;
 }
 
 interface StudentGradeRow {
@@ -81,6 +83,7 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
   initialSubjectId,
   initialClassKey,
   onNavigateToSubjects,
+  onNavigateToRatios,
 }) => {
   // Filter accessible subjects
   const accessibleSubjects = useMemo(() => {
@@ -127,7 +130,7 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
     if (initialClassKey && availableClasses.includes(initialClassKey)) {
       return initialClassKey;
     }
-    return availableClasses.length > 0 ? availableClasses[0] : 'ม.1/1';
+    return availableClasses.length > 0 ? availableClasses[0] : 'ป.1/1';
   });
 
   useEffect(() => {
@@ -153,21 +156,12 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
   // Sync weights from subject config if present
   useEffect(() => {
     if (!selectedSubject) return;
-    const ratio = selectedSemester === 2 ? selectedSubject.ratioSemester2 : selectedSubject.ratioSemester1;
-    if (ratio && ratio.courseworkWeight !== undefined && ratio.midtermWeight !== undefined && ratio.finalExamWeight !== undefined) {
-      setWeights({
-        coursework: ratio.courseworkWeight,
-        midterm: ratio.midtermWeight,
-        final: ratio.finalExamWeight,
-      });
-    } else {
-      // Default: 50 : 20 : 30
-      setWeights({
-        coursework: 50,
-        midterm: 20,
-        final: 30,
-      });
-    }
+    const ratio = getSubjectRatio(selectedSubject, selectedSemester === 2 ? 2 : 1);
+    setWeights({
+      coursework: ratio.courseworkWeight,
+      midterm: ratio.midtermWeight,
+      final: ratio.finalExamWeight,
+    });
   }, [selectedSubject, selectedSemester]);
 
   // Temporary weight editing state inside modal
@@ -346,18 +340,14 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
     }).length;
   }, [finalRecord, classroomStudents]);
 
-  // Active weights: ยึดตามคะแนนเต็มของแบบทดสอบกลางภาค และแบบทดสอบปลายภาค
+  // Active weights: ยึดตามสัดส่วนคะแนนที่กำหนดไว้ในเมนูสัดส่วนคะแนนเป็นหลัก
   const activeWeights = useMemo(() => {
-    const midMax = midtermExam ? Number(midtermExam.maxScore) : weights.midterm;
-    const finMax = finalExam ? Number(finalExam.maxScore) : weights.final;
-    // คะแนนเก็บจากใบงานจะคำนวณตามส่วนที่เหลือเพื่อให้คะแนนรวมทั้งสิ้นเท่ากับ 100 คะแนน
-    const cwMax = Math.max(0, 100 - midMax - finMax);
     return {
-      coursework: cwMax,
-      midterm: midMax,
-      final: finMax,
+      coursework: weights.coursework,
+      midterm: weights.midterm,
+      final: weights.final,
     };
-  }, [midtermExam, finalExam, weights]);
+  }, [weights]);
 
   // Compute Grade Rows for Semester 1 or Semester 2
   const computedRows: StudentGradeRow[] = useMemo(() => {
@@ -423,8 +413,13 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
 
           if (effectiveScore !== undefined) {
             midtermRaw = effectiveScore;
-            // ยึดตามคะแนนเต็มของแบบทดสอบกลางภาคโดยตรง
-            autoMidtermScore = Math.min(activeWeights.midterm, Math.max(0, effectiveScore));
+            // คำนวณเทียบตามสัดส่วนคะแนน activeWeights.midterm เป็นหลัก (เก็บคะแนนดิบแล้วทำการหารเพื่อได้คะแนนจริงตามสัดส่วน)
+            const examRawMax = midtermExam?.rawMaxScore || midtermExam?.maxScore || activeWeights.midterm;
+            if (examRawMax > 0 && examRawMax !== activeWeights.midterm) {
+              autoMidtermScore = Number(((effectiveScore / examRawMax) * activeWeights.midterm).toFixed(2));
+            } else {
+              autoMidtermScore = Math.min(activeWeights.midterm, Math.max(0, effectiveScore));
+            }
           }
         }
       } else if (semData?.midtermScore !== undefined) {
@@ -436,7 +431,7 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
         ? studentCustom.midtermScore
         : autoMidtermScore;
 
-      // 3. Final Exam Score (ยึดตามคะแนนเต็มของแบบทดสอบปลายภาค)
+      // 3. Final Exam Score (ยึดตามสัดส่วนปลายภาคที่กำหนดไว้เป็นหลัก โดยเก็บคะแนนดิบแล้วทำการหารเทียบสัดส่วน)
       let autoFinalScore = 0;
       let finalRaw: number | undefined = undefined;
       let finalStatus: string | undefined = undefined;
@@ -454,8 +449,13 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
 
           if (effectiveScore !== undefined) {
             finalRaw = effectiveScore;
-            // ยึดตามคะแนนเต็มของแบบทดสอบปลายภาคโดยตรง
-            autoFinalScore = Math.min(activeWeights.final, Math.max(0, effectiveScore));
+            // คำนวณเทียบตามสัดส่วนคะแนน activeWeights.final เป็นหลัก (เก็บคะแนนดิบแล้วทำการหารเพื่อได้คะแนนจริงตามสัดส่วน)
+            const examRawMax = finalExam?.rawMaxScore || finalExam?.maxScore || activeWeights.final;
+            if (examRawMax > 0 && examRawMax !== activeWeights.final) {
+              autoFinalScore = Number(((effectiveScore / examRawMax) * activeWeights.final).toFixed(2));
+            } else {
+              autoFinalScore = Math.min(activeWeights.final, Math.max(0, effectiveScore));
+            }
           }
         }
       } else if (semData?.finalExamScore !== undefined) {
@@ -677,21 +677,29 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
 
     // Save ratio back into Subject if requested
     if (selectedSubject) {
+      const examW = tempWeights.midterm + tempWeights.final;
+      const presetStr = `${tempWeights.coursework}:${examW}` as any;
       const updatedSubject: Subject = {
         ...selectedSubject,
         ...(selectedSemester === 2
           ? {
               ratioSemester2: {
                 courseworkWeight: tempWeights.coursework,
+                examWeight: examW,
                 midtermWeight: tempWeights.midterm,
                 finalExamWeight: tempWeights.final,
+                totalTargetScore: 100,
+                ratioPreset: presetStr,
               },
             }
           : {
               ratioSemester1: {
                 courseworkWeight: tempWeights.coursework,
+                examWeight: examW,
                 midtermWeight: tempWeights.midterm,
                 finalExamWeight: tempWeights.final,
+                totalTargetScore: 100,
+                ratioPreset: presetStr,
               },
             }),
       };
@@ -700,7 +708,7 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
         onUpdateSubjects(storage.getSubjects());
       }
     }
-    showToast(`บันทึกสัดส่วนคะแนนเป็น ใบงาน ${tempWeights.coursework} : กลางภาค ${tempWeights.midterm} : ปลายภาค ${tempWeights.final} (รวม 100 คะแนน) เรียบร้อย`);
+    showToast(`บันทึกสัดส่วน 2 ส่วน: ใบงาน ${tempWeights.coursework} : สอบ ${tempWeights.midterm + tempWeights.final} (รวม 100 คะแนน) เรียบร้อย`);
   };
 
   // Auto Recalculate & Sync from original raw assignments and exams
@@ -932,18 +940,6 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => {
-                setTempWeights(activeWeights);
-                setShowWeightModal(true);
-              }}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="ตั้งค่าสัดส่วนคะแนน (ใบงาน / กลางภาค / ปลายภาค)"
-            >
-              <Sliders className="w-3.5 h-3.5 text-slate-600" />
-              <span>สัดส่วน: {activeWeights.coursework}:{activeWeights.midterm}:{activeWeights.final}</span>
-            </button>
-
             <button
               onClick={handleSyncFromSystem}
               className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -1406,18 +1402,18 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
                   <th className="py-3 px-3 w-24">รหัสประจำตัว</th>
                   <th className="py-3 px-4 min-w-[170px]">ชื่อ - นามสกุล</th>
                   
-                  {/* คะแนนรวมจากใบงาน */}
-                  <th className="py-3 px-3 text-center bg-teal-50/80 text-teal-950 min-w-[130px]">
-                    <div>คะแนนรวมจากใบงาน</div>
-                    <div className="text-[10px] font-semibold text-teal-700">
+                  {/* 1. คะแนนเก็บใบงาน/ภาระงาน */}
+                  <th className="py-3 px-3 text-center bg-teal-50/80 text-teal-950 min-w-[140px]">
+                    <div className="font-extrabold text-teal-950">1. คะแนนเก็บใบงาน/ภาระงาน</div>
+                    <div className="text-[10px] font-bold text-teal-700">
                       (เต็ม {activeWeights.coursework} คะแนน)
                     </div>
                   </th>
 
-                  {/* คะแนนสอบกลางภาค */}
+                  {/* 2.1 คะแนนสอบกลางภาค */}
                   <th className="py-3 px-3 text-center bg-blue-50/80 text-blue-950 min-w-[140px]">
-                    <div>คะแนนสอบกลางภาค</div>
-                    <div className="text-[10px] font-semibold text-blue-700">
+                    <div className="font-extrabold text-blue-950">2.1 สอบกลางภาค</div>
+                    <div className="text-[10px] font-bold text-blue-700">
                       (เต็ม {activeWeights.midterm} คะแนน)
                     </div>
                     {midtermExam && (
@@ -1431,10 +1427,10 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
                     )}
                   </th>
 
-                  {/* คะแนนสอบปลายภาค */}
+                  {/* 2.2 คะแนนสอบปลายภาค */}
                   <th className="py-3 px-3 text-center bg-indigo-50/80 text-indigo-950 min-w-[140px]">
-                    <div>คะแนนสอบปลายภาค</div>
-                    <div className="text-[10px] font-semibold text-indigo-700">
+                    <div className="font-extrabold text-indigo-950">2.2 สอบปลายภาค</div>
+                    <div className="text-[10px] font-bold text-indigo-700">
                       (เต็ม {activeWeights.final} คะแนน)
                     </div>
                     {finalExam && (
@@ -1517,12 +1513,17 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
                                 row.midtermStatus === 'absent'
                                   ? 'ขาดสอบแบบทดสอบกลางภาค'
                                   : row.midtermRaw !== undefined
-                                  ? `คะแนนจาก ${midtermExam?.title || 'แบบทดสอบกลางภาค'}: ${row.midtermRaw}/${activeWeights.midterm}${row.midtermStatus === 'retested' ? ' (สอบแก้ตัว)' : ''}`
+                                  ? `คะแนนดิบ: ${row.midtermRaw}/${midtermExam?.rawMaxScore || midtermExam?.maxScore || activeWeights.midterm} (หารเทียบสัดส่วนเต็ม ${activeWeights.midterm})${row.midtermStatus === 'retested' ? ' (สอบแก้ตัว)' : ''}`
                                   : `คะแนนเต็ม ${activeWeights.midterm} คะแนน (ยึดตามแบบทดสอบกลางภาค)`
                               }
                             >
                               {row.midtermScore !== undefined && row.midtermScore !== null ? row.midtermScore : 0}
                             </span>
+                            {row.midtermRaw !== undefined && row.midtermStatus !== 'absent' && (
+                              <span className="text-[9px] text-blue-600/80 font-mono" title={`คะแนนดิบที่ทำได้ ${row.midtermRaw} คะแนน นำมาหารเทียบสัดส่วนเต็ม ${activeWeights.midterm}`}>
+                                ดิบ {row.midtermRaw}
+                              </span>
+                            )}
                             {row.midtermStatus === 'absent' && (
                               <span className="text-[9px] text-rose-600 font-bold">ขาดสอบ</span>
                             )}
@@ -1543,12 +1544,17 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
                                 row.finalStatus === 'absent'
                                   ? 'ขาดสอบแบบทดสอบปลายภาค'
                                   : row.finalRaw !== undefined
-                                  ? `คะแนนจาก ${finalExam?.title || 'แบบทดสอบปลายภาค'}: ${row.finalRaw}/${activeWeights.final}${row.finalStatus === 'retested' ? ' (สอบแก้ตัว)' : ''}`
+                                  ? `คะแนนดิบ: ${row.finalRaw}/${finalExam?.rawMaxScore || finalExam?.maxScore || activeWeights.final} (หารเทียบสัดส่วนเต็ม ${activeWeights.final})${row.finalStatus === 'retested' ? ' (สอบแก้ตัว)' : ''}`
                                   : `คะแนนเต็ม ${activeWeights.final} คะแนน (ยึดตามแบบทดสอบปลายภาค)`
                               }
                             >
                               {row.finalScore !== undefined && row.finalScore !== null ? row.finalScore : 0}
                             </span>
+                            {row.finalRaw !== undefined && row.finalStatus !== 'absent' && (
+                              <span className="text-[9px] text-indigo-600/80 font-mono" title={`คะแนนดิบที่ทำได้ ${row.finalRaw} คะแนน นำมาหารเทียบสัดส่วนเต็ม ${activeWeights.final}`}>
+                                ดิบ {row.finalRaw}
+                              </span>
+                            )}
                             {row.finalStatus === 'absent' && (
                               <span className="text-[9px] text-rose-600 font-bold">ขาดสอบ</span>
                             )}
@@ -1682,100 +1688,122 @@ export const GradeCalculation: React.FC<GradeCalculationProps> = ({
 
             {/* Quick Presets */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700">สัดส่วนมาตรฐานที่พบบ่อย:</label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => applyPresetWeights(50, 20, 30)}
-                  className={`py-1.5 px-2 rounded-xl text-xs font-semibold border text-center transition-colors cursor-pointer ${
-                    tempWeights.coursework === 50 && tempWeights.midterm === 20 && tempWeights.final === 30
-                      ? 'bg-emerald-50 border-emerald-500 text-emerald-700 font-bold'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  50 : 20 : 30
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyPresetWeights(60, 20, 20)}
-                  className={`py-1.5 px-2 rounded-xl text-xs font-semibold border text-center transition-colors cursor-pointer ${
-                    tempWeights.coursework === 60 && tempWeights.midterm === 20 && tempWeights.final === 20
-                      ? 'bg-emerald-50 border-emerald-500 text-emerald-700 font-bold'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  60 : 20 : 20
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyPresetWeights(70, 15, 15)}
-                  className={`py-1.5 px-2 rounded-xl text-xs font-semibold border text-center transition-colors cursor-pointer ${
-                    tempWeights.coursework === 70 && tempWeights.midterm === 15 && tempWeights.final === 15
-                      ? 'bg-emerald-50 border-emerald-500 text-emerald-700 font-bold'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  70 : 15 : 15
-                </button>
+              <label className="text-xs font-bold text-slate-700">สัดส่วนมาตรฐาน 2 ส่วน (ใบงาน : สอบ):</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { cw: 70, mid: 15, fin: 15, label: '70 : 30' },
+                  { cw: 60, mid: 20, fin: 20, label: '60 : 40' },
+                  { cw: 50, mid: 20, fin: 30, label: '50 : 50' },
+                  { cw: 80, mid: 10, fin: 10, label: '80 : 20' },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => applyPresetWeights(item.cw, item.mid, item.fin)}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-semibold border text-center transition-colors cursor-pointer ${
+                      tempWeights.coursework === item.cw && tempWeights.midterm + tempWeights.final === (100 - item.cw)
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-700 font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Inputs */}
+            {/* Inputs: 2 Parts */}
             <div className="space-y-3 pt-2">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  1. คะแนนรวมจากใบงาน (Coursework):
-                </label>
+              {/* Part 1: Coursework */}
+              <div className="p-3 bg-teal-50/50 border border-teal-200 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-teal-950">
+                    1. คะแนนเก็บใบงาน/ภาระงาน:
+                  </label>
+                  <span className="text-[11px] font-bold text-teal-700">
+                    {tempWeights.coursework} / 100
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min="0"
                     max="100"
                     value={tempWeights.coursework}
-                    onChange={(e) =>
-                      setTempWeights({ ...tempWeights, coursework: Number(e.target.value) || 0 })
-                    }
-                    className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                      const remainingExam = 100 - val;
+                      const currentExam = tempWeights.midterm + tempWeights.final;
+                      let newMid = Math.round(remainingExam / 2);
+                      let newFin = remainingExam - newMid;
+                      if (currentExam > 0) {
+                        newMid = Math.round((tempWeights.midterm / currentExam) * remainingExam);
+                        newFin = remainingExam - newMid;
+                      }
+                      setTempWeights({ coursework: val, midterm: newMid, final: newFin });
+                    }}
+                    className="w-full text-xs font-bold bg-white border border-teal-300 rounded-xl px-3 py-2 text-slate-800"
                   />
-                  <span className="text-xs text-slate-500 shrink-0">คะแนน</span>
+                  <span className="text-xs text-teal-800 font-semibold shrink-0">คะแนน</span>
                 </div>
+                <p className="text-[10px] text-teal-700">เมื่อกำหนดคะแนนเก็บจากใบงานแล้ว คะแนนที่เหลือจะกลายเป็นคะแนนสอบโดยอัตโนมัติ</p>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  2. คะแนนสอบกลางภาค (Midterm Exam):
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={tempWeights.midterm}
-                    onChange={(e) =>
-                      setTempWeights({ ...tempWeights, midterm: Number(e.target.value) || 0 })
-                    }
-                    className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
-                  />
-                  <span className="text-xs text-slate-500 shrink-0">คะแนน</span>
+              {/* Part 2: Exams */}
+              <div className="p-3 bg-blue-50/50 border border-blue-200 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-blue-950">
+                    2. คะแนนสอบ (คงเหลือจากใบงาน):
+                  </label>
+                  <span className="text-[11px] font-bold text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded-md">
+                    {tempWeights.midterm + tempWeights.final} คะแนน
+                  </span>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  3. คะแนนสอบปลายภาค (Final Exam):
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={tempWeights.final}
-                    onChange={(e) =>
-                      setTempWeights({ ...tempWeights, final: Number(e.target.value) || 0 })
-                    }
-                    className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800"
-                  />
-                  <span className="text-xs text-slate-500 shrink-0">คะแนน</span>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      2.1 สอบกลางภาค:
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max={100 - tempWeights.coursework}
+                        value={tempWeights.midterm}
+                        onChange={(e) => {
+                          const newMid = Math.max(0, Number(e.target.value) || 0);
+                          const remainingExam = 100 - tempWeights.coursework;
+                          const newFin = Math.max(0, remainingExam - newMid);
+                          setTempWeights({ ...tempWeights, midterm: newMid, final: newFin });
+                        }}
+                        className="w-full text-xs font-bold bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-800"
+                      />
+                      <span className="text-[11px] text-slate-500">คะแนน</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      2.2 สอบปลายภาค:
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max={100 - tempWeights.coursework}
+                        value={tempWeights.final}
+                        onChange={(e) => {
+                          const newFin = Math.max(0, Number(e.target.value) || 0);
+                          const remainingExam = 100 - tempWeights.coursework;
+                          const newMid = Math.max(0, remainingExam - newFin);
+                          setTempWeights({ ...tempWeights, midterm: newMid, final: newFin });
+                        }}
+                        className="w-full text-xs font-bold bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-800"
+                      />
+                      <span className="text-[11px] text-slate-500">คะแนน</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

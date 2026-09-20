@@ -149,6 +149,7 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
   let minScoreVal = 999;
 
   if (exam && examRecord) {
+    const rawMax = exam.rawMaxScore || exam.maxScore;
     sortedStudents.forEach((student) => {
       const scoreObj = examRecord.studentScores[student.id];
       if (scoreObj) {
@@ -166,7 +167,10 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
             totalScoreSum += finalScore;
             if (finalScore > maxScoreVal) maxScoreVal = finalScore;
             if (finalScore < minScoreVal) minScoreVal = finalScore;
-            if (finalScore >= exam.passingScore) totalPassed++;
+            const scaledScore = scoreObj.scaledScore !== undefined 
+              ? scoreObj.scaledScore 
+              : (rawMax > 0 ? (finalScore / rawMax) * exam.maxScore : finalScore);
+            if (scaledScore >= exam.passingScore) totalPassed++;
           }
         }
       }
@@ -290,7 +294,6 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
                     <th className="py-1.5 px-2 border border-slate-700 w-16">ร้อยละ (%)</th>
                     <th className="py-1.5 px-2 border border-slate-700 w-20">สถานะ</th>
                     <th className="py-1.5 px-2 border border-slate-700 w-20">ผลประเมิน</th>
-                    <th className="py-1.5 px-2 border border-slate-700 w-28">ลายมือชื่อนักเรียน</th>
                     <th className="py-1.5 px-2 border border-slate-700 w-24">หมายเหตุ</th>
                   </tr>
                 </thead>
@@ -302,10 +305,14 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
                     const status = sc?.status ?? 'normal';
                     const isRetest = status === 'retested';
                     const effectiveScore = isRetest && sc?.retestScore !== undefined ? sc.retestScore : scoreVal;
-                    const percent = exam.maxScore > 0 && hasScore ? ((effectiveScore / exam.maxScore) * 100).toFixed(0) : '-';
+                    const rawMax = exam.rawMaxScore || exam.maxScore;
+                    const scaledScore = sc?.scaledScore !== undefined 
+                      ? sc.scaledScore 
+                      : (rawMax > 0 ? (effectiveScore / rawMax) * exam.maxScore : effectiveScore);
+                    const percent = exam.maxScore > 0 && hasScore ? ((scaledScore / exam.maxScore) * 100).toFixed(0) : '-';
                     const isAbsent = status === 'absent';
                     const isLeave = status === 'leave';
-                    const isPassed = !isAbsent && !isLeave && hasScore && effectiveScore >= exam.passingScore;
+                    const isPassed = !isAbsent && !isLeave && hasScore && scaledScore >= exam.passingScore;
 
                     return (
                       <tr key={student.id} className="hover:bg-slate-50">
@@ -322,7 +329,7 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
                           ) : !hasScore ? (
                             <span className="text-slate-400 font-normal">-</span>
                           ) : (
-                            <span>{effectiveScore}</span>
+                            <span>{scaledScore}</span>
                           )}
                         </td>
                         <td className="py-1 px-2 border border-slate-700 text-center font-mono">
@@ -346,9 +353,6 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
                           ) : (
                             <span className="text-rose-600">✗ ไม่ผ่าน</span>
                           )}
-                        </td>
-                        <td className="py-1 px-2 border border-slate-700 text-center text-slate-300">
-                          .......................
                         </td>
                         <td className="py-1 px-2 border border-slate-700 text-left text-[10px] text-slate-500">
                           {sc?.note || ''}
@@ -454,22 +458,6 @@ export const PrintExamModal: React.FC<PrintExamModalProps> = ({
                 </div>
               </div>
             )}
-
-            {/* Signatures */}
-            <div className="mt-8 pt-6 border-t border-slate-200 grid grid-cols-3 text-center text-xs gap-4">
-              <div className="space-y-8">
-                <div>ลงชื่อ........................................................</div>
-                <div>( {subject.teacherName || '...................................................'} )<br/><span className="text-slate-500">ครูผู้สอน / ผู้ตรวจข้อสอบ</span></div>
-              </div>
-              <div className="space-y-8">
-                <div>ลงชื่อ........................................................</div>
-                <div>( ................................................... )<br/><span className="text-slate-500">หัวหน้ากลุ่มสาระการเรียนรู้</span></div>
-              </div>
-              <div className="space-y-8">
-                <div>ลงชื่อ........................................................</div>
-                <div>( {schoolSettings.directorName || '...................................................'} )<br/><span className="text-slate-500">ผู้อำนวยการสถานศึกษา</span></div>
-              </div>
-            </div>
 
           </div>
         </div>

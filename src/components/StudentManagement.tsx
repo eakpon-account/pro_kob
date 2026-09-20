@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -16,27 +16,45 @@ import {
   Plus,
   Cloud,
   RefreshCw,
-  Database
+  Database,
+  GraduationCap,
+  Eye
 } from 'lucide-react';
 import { Student } from '../types';
 import { storage } from '../services/storage';
 import { downloadStudentTemplate, parseStudentsFromExcel } from '../utils/excelHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { StudentTranscriptModal } from './StudentTranscriptModal';
 import * as XLSX from 'xlsx';
 
 interface StudentManagementProps {
   students: Student[];
   onUpdateStudents: (newStudents: Student[]) => void;
+  activeAcademicYear?: string;
+  onNavigateToPromotion?: () => void;
 }
 
 export const StudentManagement: React.FC<StudentManagementProps> = ({
   students,
   onUpdateStudents,
+  activeAcademicYear,
+  onNavigateToPromotion,
 }) => {
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
+  const [selectedYearFilter, setSelectedYearFilter] = useState<string>(activeAcademicYear || 'all');
+  const [viewingTranscriptStudentId, setViewingTranscriptStudentId] = useState<string | null>(null);
+
+  const availableYears = useMemo(() => storage.getAvailableAcademicYears(), [students]);
+
+  // Sync selectedYearFilter if activeAcademicYear changes
+  useEffect(() => {
+    if (activeAcademicYear) {
+      setSelectedYearFilter(activeAcademicYear);
+    }
+  }, [activeAcademicYear]);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -53,7 +71,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [formLastName, setFormLastName] = useState('');
   const [formStudentCode, setFormStudentCode] = useState('');
   const [formStudentNumber, setFormStudentNumber] = useState<number>(1);
-  const [formGradeLevel, setFormGradeLevel] = useState('ม.1');
+  const [formGradeLevel, setFormGradeLevel] = useState('ป.1');
   const [formClassroom, setFormClassroom] = useState('1');
   const [formGender, setFormGender] = useState<'M' | 'F'>('M');
   const [formPhone, setFormPhone] = useState('');
@@ -82,6 +100,10 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const filteredStudents = useMemo(() => {
     return students
       .filter((s) => {
+        if (selectedYearFilter !== 'all') {
+          const stdYear = s.academicYear || storage.getSchoolSettings().academicYear || '2568';
+          if (stdYear !== selectedYearFilter) return false;
+        }
         if (selectedGradeFilter !== 'all' && s.gradeLevel !== selectedGradeFilter) return false;
         if (selectedClassFilter !== 'all' && s.classKey !== selectedClassFilter) return false;
         if (searchQuery.trim()) {
@@ -102,7 +124,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
         }
         return a.studentNumber - b.studentNumber;
       });
-  }, [students, selectedGradeFilter, selectedClassFilter, searchQuery]);
+  }, [students, selectedGradeFilter, selectedClassFilter, selectedYearFilter, searchQuery]);
 
   // Open Edit Modal
   const handleOpenEdit = (st: Student) => {
@@ -127,7 +149,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
     setFormLastName('');
     setFormStudentCode(String(68000 + students.length + 1));
     setFormStudentNumber(students.length > 0 ? Math.max(...students.map(s => s.studentNumber)) + 1 : 1);
-    setFormGradeLevel(selectedGradeFilter !== 'all' ? selectedGradeFilter : 'ม.1');
+    setFormGradeLevel(selectedGradeFilter !== 'all' ? selectedGradeFilter : 'ป.1');
     setFormClassroom(selectedClassFilter !== 'all' ? selectedClassFilter.split('/')[1] || '1' : '1');
     setFormGender('M');
     setFormPhone('');
@@ -151,7 +173,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
       gradeLevel: formGradeLevel,
       classroom: formClassroom,
       classKey,
-      academicYear: '2568',
+      academicYear: activeAcademicYear || storage.getSchoolSettings().academicYear || '2568',
       gender: formGender,
       status: 'active',
       phone: formPhone.trim(),
@@ -410,6 +432,16 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {onNavigateToPromotion && (
+              <button
+                onClick={onNavigateToPromotion}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <GraduationCap className="w-4 h-4 text-purple-600" />
+                <span>เลื่อนชั้นเรียน</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowImportModal(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
@@ -450,6 +482,23 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg w-60 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
               />
+            </div>
+
+            {/* Academic Year Filter */}
+            <div className="flex items-center gap-1.5 text-xs bg-purple-50/70 px-2.5 py-1.5 rounded-lg border border-purple-200">
+              <span className="text-purple-700 font-semibold">ปีการศึกษา:</span>
+              <select
+                value={selectedYearFilter}
+                onChange={(e) => setSelectedYearFilter(e.target.value)}
+                className="bg-transparent border-0 text-xs font-bold text-purple-900 p-0 focus:ring-0 cursor-pointer"
+              >
+                <option value="all">ทุกปีการศึกษา</option>
+                {availableYears.map((yr) => (
+                  <option key={yr} value={yr}>
+                    ปี {yr}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Grade Level Filter */}
@@ -541,13 +590,27 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                     {st.phone || '-'}
                   </td>
                   <td className="py-3 px-3 text-center">
-                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      ปกติ
-                    </span>
+                    {st.academicHistory && st.academicHistory.length > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200" title={`มีประวัติการเรียนสะสม ${st.academicHistory.length} ปีการศึกษา`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                        เลื่อนชั้นแล้ว
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        ปกติ
+                      </span>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-center">
-                    <div className="flex items-center justify-center gap-1.5">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => setViewingTranscriptStudentId(st.id)}
+                        className="p-1.5 rounded-md text-purple-600 hover:text-purple-800 hover:bg-purple-50 border border-transparent hover:border-purple-200 transition-colors cursor-pointer"
+                        title="ดูผลการเรียนสะสมย้อนหลังทุกปี (Transcript)"
+                      >
+                        <GraduationCap className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => handleOpenEdit(st)}
                         className="p-1.5 rounded-md text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 transition-colors cursor-pointer"
@@ -680,12 +743,6 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                     onChange={(e) => setFormGradeLevel(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500"
                   >
-                    <option value="ม.1">ม.1</option>
-                    <option value="ม.2">ม.2</option>
-                    <option value="ม.3">ม.3</option>
-                    <option value="ม.4">ม.4</option>
-                    <option value="ม.5">ม.5</option>
-                    <option value="ม.6">ม.6</option>
                     <option value="ป.1">ป.1</option>
                     <option value="ป.2">ป.2</option>
                     <option value="ป.3">ป.3</option>
@@ -911,6 +968,13 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           onClose={() => setStudentToDelete(null)}
         />
       )}
+
+      {/* Multi-Year Cumulative Transcript Modal */}
+      <StudentTranscriptModal
+        isOpen={Boolean(viewingTranscriptStudentId)}
+        studentId={viewingTranscriptStudentId || undefined}
+        onClose={() => setViewingTranscriptStudentId(null)}
+      />
 
     </div>
   );

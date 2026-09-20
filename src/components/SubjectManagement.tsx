@@ -16,18 +16,21 @@ import {
   UserPlus,
   Filter,
   Eye,
-  ArrowRight
+  ArrowRight,
+  Sliders
 } from 'lucide-react';
 import { Subject, User as UserType } from '../types';
 import { storage } from '../services/storage';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { ROLE_CONFIGS } from './UserManagement';
+import { getSubjectRatio } from '../utils/grading';
 
 interface SubjectManagementProps {
   subjects: Subject[];
   currentUser: UserType;
   onUpdateSubjects: (newSubjects: Subject[]) => void;
   onNavigateToUsers?: () => void;
+  onNavigateToRatios?: (subjectId?: string) => void;
 }
 
 export const SubjectManagement: React.FC<SubjectManagementProps> = ({
@@ -35,6 +38,7 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
   currentUser,
   onUpdateSubjects,
   onNavigateToUsers,
+  onNavigateToRatios,
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTeacherRequiredAlert, setShowTeacherRequiredAlert] = useState(false);
@@ -51,8 +55,8 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
   const [formCode, setFormCode] = useState('');
   const [formName, setFormName] = useState('');
   const [formCredits, setFormCredits] = useState<number>(1.0);
-  const [formGradeLevel, setFormGradeLevel] = useState('ม.1');
-  const [formTargetClasses, setFormTargetClasses] = useState('ม.1/1, ม.1/2');
+  const [formGradeLevel, setFormGradeLevel] = useState('ป.1');
+  const [formTargetClasses, setFormTargetClasses] = useState('ป.1/1, ป.1/2');
   const [formTeacherId, setFormTeacherId] = useState<string>('');
   const [formDescription, setFormDescription] = useState('');
 
@@ -91,8 +95,8 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
     setFormCode('');
     setFormName('');
     setFormCredits(1.0);
-    setFormGradeLevel('ม.1');
-    setFormTargetClasses('ม.1/1, ม.1/2');
+    setFormGradeLevel('ป.1');
+    setFormTargetClasses('ป.1/1, ป.1/2');
     
     // Default to current user if teacher/admin, or first available teacher
     const defaultTeacher = availableTeachers.find(t => t.id === currentUser.id) || availableTeachers[0];
@@ -466,6 +470,34 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
                 </div>
               </div>
 
+              {/* Score Ratio Summary & Quick Config Action */}
+              {(() => {
+                const r1 = getSubjectRatio(sub, 1);
+                const r2 = getSubjectRatio(sub, 2);
+                return (
+                  <div className="mt-3 pt-3 border-t border-slate-100/80 flex items-center justify-between gap-2">
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      <span className="font-semibold text-slate-600 block text-[10px] uppercase tracking-wider font-sans">สัดส่วนคะแนน (ใบงาน:กลาง:ปลาย)</span>
+                      <span className="text-emerald-700 font-bold">ภ.1</span> {r1.courseworkWeight}:{r1.midtermWeight}:{r1.finalExamWeight}
+                      <span className="mx-1.5 text-slate-300">|</span>
+                      <span className="text-indigo-700 font-bold">ภ.2</span> {r2.courseworkWeight}:{r2.midtermWeight}:{r2.finalExamWeight}
+                    </div>
+
+                    {onNavigateToRatios && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToRatios(sub.id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                        title="คลิกเพื่อตั้งค่าสัดส่วนคะแนนของวิชานี้"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-amber-600" />
+                        <span>สัดส่วน</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
             </div>
           );
         })}
@@ -717,12 +749,6 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
                     onChange={(e) => setFormGradeLevel(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 bg-white"
                   >
-                    <option value="ม.1">ม.1</option>
-                    <option value="ม.2">ม.2</option>
-                    <option value="ม.3">ม.3</option>
-                    <option value="ม.4">ม.4</option>
-                    <option value="ม.5">ม.5</option>
-                    <option value="ม.6">ม.6</option>
                     <option value="ป.1">ป.1</option>
                     <option value="ป.2">ป.2</option>
                     <option value="ป.3">ป.3</option>
@@ -739,7 +765,7 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="ม.1/1, ม.1/2"
+                    placeholder="ป.1/1, ป.1/2"
                     value={formTargetClasses}
                     onChange={(e) => setFormTargetClasses(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500"

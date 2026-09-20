@@ -13,6 +13,24 @@ export interface User {
   createdAt?: string;
 }
 
+export type StudentStatus = 'active' | 'inactive' | 'graduated' | 'transferred' | 'repeated';
+
+export interface StudentAcademicHistory {
+  academicYear: string;
+  gradeLevel: string; // เช่น ม.1
+  classroom: string;  // เช่น 1
+  classKey: string;   // เช่น ม.1/1
+  studentNumber: number;
+  status: StudentStatus;
+  promotedAt?: string;
+  promotedBy?: string;
+  gpa?: number;
+  totalCredits?: number;
+  passedSubjectsCount?: number;
+  totalSubjectsCount?: number;
+  remark?: string;
+}
+
 export interface Student {
   id: string;
   studentCode: string; // รหัสนักเรียน เช่น 68001
@@ -25,9 +43,43 @@ export interface Student {
   classKey: string; // e.g. "ม.1/1"
   academicYear: string; // เช่น 2568
   gender: 'M' | 'F';
-  status: 'active' | 'inactive';
+  status: StudentStatus;
+  academicHistory?: StudentAcademicHistory[];
   phone?: string;
   notes?: string;
+}
+
+export interface PromotionItemDetail {
+  studentId: string;
+  studentCode: string;
+  name: string;
+  fromGradeLevel: string;
+  fromClassKey: string;
+  fromStudentNumber: number;
+  toGradeLevel: string;
+  toClassKey: string;
+  toStudentNumber: number;
+  action: 'promote' | 'repeat' | 'graduated' | 'transferred';
+  gpa?: number;
+  passedAll?: boolean;
+}
+
+export interface PromotionRecord {
+  id: string;
+  timestamp: string;
+  executedBy: string;
+  fromAcademicYear: string;
+  toAcademicYear: string;
+  sourceGradeLevel?: string;
+  sourceClassKey?: string;
+  totalStudents: number;
+  promotedCount: number;
+  repeatedCount: number;
+  graduatedCount: number;
+  transferredCount: number;
+  studentsDetail: PromotionItemDetail[];
+  copiedSubjectsCount?: number;
+  note?: string;
 }
 
 export type AssignmentCategory = 
@@ -57,9 +109,14 @@ export interface Assignment {
 }
 
 export interface SubjectGradingRatio {
-  courseworkWeight?: number;
-  finalExamWeight?: number;
-  midtermWeight?: number; 
+  courseworkWeight?: number; // 1. คะแนนเก็บใบงาน/ภาระงานระหว่างเรียน เช่น 70, 80, 60, 50
+  examWeight?: number;       // 2. คะแนนสอบ (เมื่อแบ่งคะแนนเก็บจากใบงานแล้ว ที่เหลือคือคะแนนสอบ) เช่น 30, 20, 40, 50
+  finalExamWeight?: number;  // คะแนนสอบปลายภาค เช่น 30, 20 (ย่อยจากคะแนนสอบ)
+  midtermWeight?: number;    // คะแนนสอบกลางภาค เช่น 20 (ย่อยจากคะแนนสอบ)
+  totalTargetScore?: number; // คะแนนเต็มรวม เช่น 100
+  ratioPreset?: '70:30' | '80:20' | '60:40' | '50:50' | 'custom';
+  description?: string;
+  updatedAt?: string;
 }
 
 export interface Subject {
@@ -200,7 +257,8 @@ export interface Exam {
   semester: 1 | 2;
   title: string;            // ชื่อแบบทดสอบ เช่น แบบทดสอบท้ายบทที่ 1, การสอบกลางภาค
   examType: ExamType;
-  maxScore: number;         // คะแนนเต็ม เช่น 20, 30, 50, 100
+  rawMaxScore?: number;     // คะแนนดิบเต็ม (เช่น 30, 40, 50, 60, 100) สำหรับเก็บคะแนนดิบและนำมาหารเทียบสัดส่วน
+  maxScore: number;         // คะแนนเต็มตามสัดส่วน (เช่น 20, 30 หรือตามที่กำหนด)
   passingScore: number;     // เกณฑ์คะแนนผ่าน เช่น 10, 15, 50
   strand?: string;          // สาระ (เช่น 1. วิทยาศาสตร์ชีวภาพ)
   standard?: string;        // มาตรฐาน
@@ -217,7 +275,8 @@ export type ExamStudentStatus = 'normal' | 'absent' | 'leave' | 'retested';
 
 export interface StudentExamScore {
   studentId: string;
-  score?: number;           // คะแนนที่สอบได้ (ถ้ายังไม่ได้กรอกจะเป็น undefined)
+  score?: number;           // คะแนนดิบที่สอบได้ (ถ้ายังไม่ได้กรอกจะเป็น undefined)
+  scaledScore?: number;     // คะแนนจริงตามสัดส่วนหลังหารเทียบ (เช่น ดิบ 32/40 -> สัดส่วน 16/20)
   status: ExamStudentStatus; // ปกติ, ขาดสอบ, ลา, สอบแก้ตัว
   retestScore?: number;     // คะแนนสอบแก้ตัว (ถ้ามี)
   note?: string;            // หมายเหตุ
