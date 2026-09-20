@@ -91,7 +91,15 @@ export default function App() {
 
   // Projected Students and Scores for the selected Academic Year
   const activeYearStudents = React.useMemo(() => {
-    return storage.getStudentsForAcademicYear(selectedAcademicYear);
+    const list = storage.getStudentsForAcademicYear(selectedAcademicYear);
+    // If no students explicitly matching this year, but students exist in the system and this is the school's active year, fallback safely
+    if (list.length === 0 && students.length > 0) {
+      const currentSchoolYear = storage.getSchoolSettings().academicYear || '2568';
+      if (selectedAcademicYear === currentSchoolYear) {
+        return students;
+      }
+    }
+    return list;
   }, [selectedAcademicYear, students]);
 
   const activeYearScores = React.useMemo(() => {
@@ -520,7 +528,7 @@ export default function App() {
 
             {currentTab === 'students' && (
               <StudentManagement
-                students={activeYearStudents}
+                students={students}
                 onUpdateStudents={setStudents}
                 activeAcademicYear={selectedAcademicYear}
                 onNavigateToPromotion={() => setCurrentTab('promotion')}

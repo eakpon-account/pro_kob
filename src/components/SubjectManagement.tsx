@@ -84,6 +84,18 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
     return subjects;
   }, [subjects, filterMySubjectsOnly, currentUser]);
 
+  // Existing real grade levels from student data
+  const existingGradesInSystem = useMemo(() => {
+    const grades = storage.getExistingGradeLevels();
+    if (grades.length > 0) return grades;
+    return ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
+  }, [showAddModal]);
+
+  // Existing real classrooms for selected grade
+  const existingClassesForSelectedGrade = useMemo(() => {
+    return storage.getExistingClassrooms(formGradeLevel);
+  }, [formGradeLevel, showAddModal]);
+
   const handleOpenAdd = () => {
     // REQUIREMENT: Must have teacher users created first!
     if (availableTeachers.length === 0) {
@@ -91,12 +103,15 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
       return;
     }
 
+    const defaultGrade = existingGradesInSystem[0] || 'ป.1';
+    const defaultClasses = storage.getExistingClassrooms(defaultGrade);
+
     setEditingSubject(null);
     setFormCode('');
     setFormName('');
     setFormCredits(1.0);
-    setFormGradeLevel('ป.1');
-    setFormTargetClasses('ป.1/1, ป.1/2');
+    setFormGradeLevel(defaultGrade);
+    setFormTargetClasses(defaultClasses.length > 0 ? defaultClasses.join(', ') : `${defaultGrade}/1`);
     
     // Default to current user if teacher/admin, or first available teacher
     const defaultTeacher = availableTeachers.find(t => t.id === currentUser.id) || availableTeachers[0];
@@ -746,15 +761,21 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
                   </label>
                   <select
                     value={formGradeLevel}
-                    onChange={(e) => setFormGradeLevel(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 bg-white"
+                    onChange={(e) => {
+                      const newGrade = e.target.value;
+                      setFormGradeLevel(newGrade);
+                      const realRooms = storage.getExistingClassrooms(newGrade);
+                      if (realRooms.length > 0) {
+                        setFormTargetClasses(realRooms.join(', '));
+                      } else {
+                        setFormTargetClasses(`${newGrade}/1`);
+                      }
+                    }}
+                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500 bg-white font-medium"
                   >
-                    <option value="ป.1">ป.1</option>
-                    <option value="ป.2">ป.2</option>
-                    <option value="ป.3">ป.3</option>
-                    <option value="ป.4">ป.4</option>
-                    <option value="ป.5">ป.5</option>
-                    <option value="ป.6">ป.6</option>
+                    {existingGradesInSystem.map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -765,11 +786,55 @@ export const SubjectManagement: React.FC<SubjectManagementProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="ป.1/1, ป.1/2"
+                    placeholder="เช่น ป.1/1, ป.1/2 หรือ ม.1/1"
                     value={formTargetClasses}
                     onChange={(e) => setFormTargetClasses(e.target.value)}
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:ring-1 focus:ring-emerald-500"
                   />
+                  {existingClassesForSelectedGrade.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                      <span className="text-[10px] text-slate-400">ห้องที่มีในระบบ:</span>
+                      {existingClassesForSelectedGrade.map((cls) => {
+                        const isSelected = formTargetClasses
+                          .split(',')
+                          .map((s) => s.trim())
+                          .includes(cls);
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => {
+                              const currentList = formTargetClasses
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean);
+                              let nextList: string[];
+                              if (isSelected) {
+                                nextList = currentList.filter((c) => c !== cls);
+                              } else {
+                                nextList = [...currentList, cls];
+                              }
+                              setFormTargetClasses(nextList.join(', '));
+                            }}
+                            className={`px-2 py-0.5 text-[10px] rounded border transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {isSelected ? '✓ ' : '+ '}ห้อง {cls}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => setFormTargetClasses(existingClassesForSelectedGrade.join(', '))}
+                        className="text-[10px] text-blue-600 hover:underline ml-1 cursor-pointer"
+                      >
+                        (เลือกทั้งหมด)
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -106,7 +106,7 @@ export const ScoreGrading: React.FC<ScoreGradingProps> = ({
   }, [selectedSubject]);
 
   const [selectedClassKey, setSelectedClassKey] = useState<string>(
-    preselectedClassKey || initialClassKey || (availableClasses.length > 0 ? availableClasses[0] : 'ป.1/1')
+    preselectedClassKey || initialClassKey || (availableClasses.length > 0 ? availableClasses[0] : (storage.getExistingClassrooms()[0] || '1'))
   );
 
   // Sync selectedSubjectId and selectedClassKey when initial props change

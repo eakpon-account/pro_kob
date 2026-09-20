@@ -579,10 +579,7 @@ class StorageService {
           const list: Student[] = [];
           snap.forEach((d) => {
             const st = d.data() as Student;
-            const g = (st.gradeLevel || '').trim();
-            if (!g.startsWith('ม.') && !g.startsWith('มัธยม')) {
-              list.push(st);
-            }
+            list.push(st);
           });
           localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(list));
           onUpdate('students');
@@ -942,29 +939,43 @@ class StorageService {
     const data = localStorage.getItem(LOCAL_STORAGE_KEYS.STUDENTS);
     let students: Student[] = data ? JSON.parse(data) : [];
     
-    // ตัด ม.1 - ม.6 ออก โดยให้คงเหลือเฉพาะระดับประถมศึกษา ป.1 - ป.6
-    const primaryStudents = students.filter((s) => {
-      const g = (s.gradeLevel || '').trim();
-      return !g.startsWith('ม.') && !g.startsWith('มัธยม');
-    });
-
-    if (primaryStudents.length !== students.length) {
-      if (primaryStudents.length === 0 && students.length > 0) {
-        // หากเดิมมีเฉพาะข้อมูล ม.1 - ม.6 เมื่อตัดออกหมด ให้สร้างข้อมูลตัวอย่างระดับประถม ป.1 - ป.6
-        const newPrimary = generateInitialStudents();
-        localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(newPrimary));
-        return newPrimary.sort((a, b) => a.studentNumber - b.studentNumber);
-      }
-      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(primaryStudents));
-      students = primaryStudents;
-    } else if (students.length === 0) {
-      const newPrimary = generateInitialStudents();
-      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(newPrimary));
-      return newPrimary.sort((a, b) => a.studentNumber - b.studentNumber);
+    // หากไม่เคยมีข้อมูลในระบบมาก่อน (First launch) ให้สร้างข้อมูลเริ่มต้น
+    if (data === null && students.length === 0) {
+      const initial = generateInitialStudents();
+      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(initial));
+      return initial.sort((a, b) => {
+        if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
+        return a.studentNumber - b.studentNumber;
+      });
     }
 
-    // เรียงลำดับจากเลขที่น้อยไปหามากตามความต้องการ
-    return primaryStudents.sort((a, b) => a.studentNumber - b.studentNumber);
+    // ตรวจสอบและเติม academicYear หรือ classKey ที่ตกหล่นให้อัตโนมัติ เพื่อป้องกันรายชื่อหาย
+    const defaultYear = this.getSchoolSettings().academicYear || '2568';
+    let hasChanges = false;
+    students = students.map((s) => {
+      let updated = false;
+      const copy = { ...s };
+      if (!copy.academicYear) {
+        copy.academicYear = defaultYear;
+        updated = true;
+      }
+      if (!copy.classKey && copy.gradeLevel && copy.classroom) {
+        copy.classKey = `${copy.gradeLevel}/${copy.classroom}`;
+        updated = true;
+      }
+      if (updated) hasChanges = true;
+      return copy;
+    });
+
+    if (hasChanges) {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(students));
+    }
+
+    // เรียงลำดับตามห้องเรียนและเลขที่น้อยไปหามาก
+    return students.sort((a, b) => {
+      if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
+      return a.studentNumber - b.studentNumber;
+    });
   }
 
   public getStudentById(id: string): Student | undefined {
@@ -1090,19 +1101,58 @@ class StorageService {
     }
   }
 
-  public bulkSaveStudents(newStudents: Student[]): void {
+  public bulkSaveStudents(
+    newStudents: Student[],
+    mode: 'merge' | 'replace_classes' | 'replace_all' = 'merge'
+  ): void {
     const existing = this.getStudents();
-    const map = new Map<string, Student>();
-    existing.forEach((s) => map.set(s.id, s));
-    newStudents.forEach((s) => map.set(s.id, s));
-    const combined = Array.from(map.values()).sort((a, b) => a.studentNumber - b.studentNumber);
+    const defaultYear = this.getSchoolSettings().academicYear || '2568';
+
+    const normalized = newStudents.map((s) => ({
+      ...s,
+      academicYear: s.academicYear || defaultYear,
+      classKey: s.classKey || `${s.gradeLevel}/${s.classroom}`,
+      status: s.status || 'active',
+    }));
+
+    let combined: Student[] = [];
+
+    if (mode === 'replace_all') {
+      combined = [...normalized];
+    } else if (mode === 'replace_classes') {
+      const targetClasses = new Set(normalized.map((s) => s.classKey));
+      const kept = existing.filter((s) => !targetClasses.has(s.classKey));
+      combined = [...kept, ...normalized];
+    } else {
+      // Merge mode: Match by id or studentCode to update in-place instead of creating duplicates
+      const map = new Map<string, Student>();
+      existing.forEach((s) => map.set(s.id, s));
+
+      normalized.forEach((s) => {
+        if (s.studentCode) {
+          const matchExisting = existing.find((e) => e.studentCode === s.studentCode);
+          if (matchExisting) {
+            s.id = matchExisting.id;
+          }
+        }
+        map.set(s.id, s);
+      });
+
+      combined = Array.from(map.values());
+    }
+
+    combined.sort((a, b) => {
+      if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
+      return a.studentNumber - b.studentNumber;
+    });
+
     localStorage.setItem(LOCAL_STORAGE_KEYS.STUDENTS, JSON.stringify(combined));
 
     if (this.db && this.firebaseConnected) {
       const batch = writeBatch(this.db);
-      newStudents.forEach((s) => {
+      combined.forEach((s) => {
         const ref = doc(this.db!, 'students', sanitizeDocId(s.id));
-        batch.set(ref, cleanForFirestore(s));
+        batch.set(ref, cleanForFirestore(s), { merge: true });
       });
       batch.commit().catch(console.error);
     }
@@ -1837,16 +1887,81 @@ class StorageService {
   }
 
   /**
+   * ดึงระดับชั้นที่มีอยู่จริงจากข้อมูลนักเรียนในระบบ (จัดเรียงตามลำดับการศึกษาไทย)
+   */
+  public getExistingGradeLevels(academicYear?: string): string[] {
+    const gradesSet = new Set<string>();
+    const students = this.getStudents();
+    const defaultYear = this.getSchoolSettings().academicYear || '2568';
+
+    students.forEach((s) => {
+      if (academicYear && academicYear !== 'all') {
+        const yr = s.academicYear || defaultYear;
+        if (yr !== academicYear) return;
+      }
+      if (s.gradeLevel && s.gradeLevel.trim()) {
+        gradesSet.add(s.gradeLevel.trim());
+      }
+    });
+
+    const ALL_ORDER = [
+      'อ.1', 'อ.2', 'อ.3',
+      'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6',
+      'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'
+    ];
+
+    return Array.from(gradesSet).sort((a, b) => {
+      const idxA = ALL_ORDER.indexOf(a);
+      const idxB = ALL_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  /**
+   * ดึงห้องเรียน (เช่น "ป.1/1", "ม.1/2") ที่มีอยู่จริงจากข้อมูลนักเรียนในระบบ
+   */
+  public getExistingClassrooms(gradeLevel?: string, academicYear?: string): string[] {
+    const classSet = new Set<string>();
+    const students = this.getStudents();
+    const defaultYear = this.getSchoolSettings().academicYear || '2568';
+
+    students.forEach((s) => {
+      if (academicYear && academicYear !== 'all') {
+        const yr = s.academicYear || defaultYear;
+        if (yr !== academicYear) return;
+      }
+      if (gradeLevel && gradeLevel !== 'all' && s.gradeLevel !== gradeLevel) {
+        return;
+      }
+      if (s.classKey && s.classKey.trim()) {
+        classSet.add(s.classKey.trim());
+      } else if (s.gradeLevel && s.classroom) {
+        classSet.add(`${s.gradeLevel.trim()}/${s.classroom.trim()}`);
+      }
+    });
+
+    return Array.from(classSet).sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
    * ดึงรายชื่อนักเรียนประจำปีการศึกษาที่ระบุ
    * หากนักเรียนถูกเลื่อนชั้นไปปีถัดไปแล้ว จะฉายภาพ (Project) ข้อมูลระดับชั้นและห้องเรียนในอดีตจาก academicHistory
    */
   public getStudentsForAcademicYear(academicYear: string): Student[] {
     const allStudents = this.getStudents();
     const result: Student[] = [];
+    const defaultYear = this.getSchoolSettings().academicYear || '2568';
 
     for (const student of allStudents) {
-      if (student.academicYear === academicYear) {
-        result.push(student);
+      const studentCurrentYear = student.academicYear || defaultYear;
+      if (studentCurrentYear === academicYear) {
+        result.push({
+          ...student,
+          academicYear: studentCurrentYear,
+        });
       } else if (student.academicHistory && student.academicHistory.length > 0) {
         const historyRecord = student.academicHistory.find((h) => h.academicYear === academicYear);
         if (historyRecord) {
@@ -1863,15 +1978,10 @@ class StorageService {
       }
     }
 
-    return result
-      .filter((s) => {
-        const g = (s.gradeLevel || '').trim();
-        return !g.startsWith('ม.') && !g.startsWith('มัธยม');
-      })
-      .sort((a, b) => {
-        if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
-        return a.studentNumber - b.studentNumber;
-      });
+    return result.sort((a, b) => {
+      if (a.classKey !== b.classKey) return a.classKey.localeCompare(b.classKey);
+      return a.studentNumber - b.studentNumber;
+    });
   }
 
   /**

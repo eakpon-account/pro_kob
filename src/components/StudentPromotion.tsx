@@ -156,21 +156,30 @@ export const StudentPromotion: React.FC<StudentPromotionProps> = ({
     });
   }, [students, selectedGrade, selectedClassKey]);
 
-  // Suggest next grade level (เฉพาะระดับประถม ป.1 - ป.6)
+  // Suggest next grade level (รองรับระดับอนุบาล ประถม มัธยมต้น และมัธยมปลาย)
   const getSuggestedNextGrade = (grade: string): { nextGrade: string; isGraduation: boolean } => {
     const g = grade.trim();
+    if (g === 'อ.1') return { nextGrade: 'อ.2', isGraduation: false };
+    if (g === 'อ.2') return { nextGrade: 'อ.3', isGraduation: false };
+    if (g === 'อ.3') return { nextGrade: 'ป.1', isGraduation: false };
     if (g === 'ป.1') return { nextGrade: 'ป.2', isGraduation: false };
     if (g === 'ป.2') return { nextGrade: 'ป.3', isGraduation: false };
     if (g === 'ป.3') return { nextGrade: 'ป.4', isGraduation: false };
     if (g === 'ป.4') return { nextGrade: 'ป.5', isGraduation: false };
     if (g === 'ป.5') return { nextGrade: 'ป.6', isGraduation: false };
-    if (g === 'ป.6') return { nextGrade: 'สำเร็จการศึกษา', isGraduation: true };
+    if (g === 'ป.6') return { nextGrade: 'ม.1', isGraduation: false };
+    if (g === 'ม.1') return { nextGrade: 'ม.2', isGraduation: false };
+    if (g === 'ม.2') return { nextGrade: 'ม.3', isGraduation: false };
+    if (g === 'ม.3') return { nextGrade: 'ม.4', isGraduation: false };
+    if (g === 'ม.4') return { nextGrade: 'ม.5', isGraduation: false };
+    if (g === 'ม.5') return { nextGrade: 'ม.6', isGraduation: false };
+    if (g === 'ม.6') return { nextGrade: 'สำเร็จการศึกษา', isGraduation: true };
     return { nextGrade: grade, isGraduation: false };
   };
 
-  // Build target class key (e.g. ป.1/1 -> ป.2/1, ป.6/1 -> จบการศึกษา)
+  // Build target class key (e.g. ป.1/1 -> ป.2/1, ม.6/1 -> จบการศึกษา)
   const getSuggestedTargetClassKey = (currentClassKey: string, nextGrade: string, isGraduation: boolean) => {
-    if (isGraduation || nextGrade === 'สำเร็จการศึกษา' || currentClassKey.startsWith('ป.6')) {
+    if (isGraduation || nextGrade === 'สำเร็จการศึกษา' || currentClassKey.startsWith('ม.6')) {
       return 'จบการศึกษา';
     }
     const parts = currentClassKey.split('/');
